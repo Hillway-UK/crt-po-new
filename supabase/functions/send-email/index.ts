@@ -686,6 +686,21 @@ serve(async (req) => {
           : [mdEmail];
         
         console.log(`Sending PO CEO approval request to ${ceoRecipients.length} recipient(s):`, ceoRecipients);
+
+        // Fetch the MD approval log to show who approved it
+        const { data: mdApprovalLog } = await supabase
+          .from('po_approval_logs')
+          .select('*, action_by:users!po_approval_logs_action_by_user_id_fkey(full_name)')
+          .eq('po_id', po.id)
+          .eq('action', 'APPROVED')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const mdApproverName = mdApprovalLog?.action_by?.full_name || 'MD/Admin';
+        const mdApprovalDate = mdApprovalLog?.created_at 
+          ? formatDate(mdApprovalLog.created_at) 
+          : 'Recently';
         
         emailResult = await resend.emails.send({
           from: formatFromEmail(mdEmail, 'CRT Property Approvals'),
@@ -699,15 +714,23 @@ serve(async (req) => {
               </div>
               
               <div style="padding: 30px; background: #f9fafb;">
+                <!-- MD Approval Banner -->
+                <div style="background: #ecfdf5; border: 1px solid #10b981; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
+                  <p style="margin: 0; color: #059669; font-weight: bold;">✓ Reviewed & Approved by MD/Admin</p>
+                  <p style="margin: 10px 0 0 0; color: #666; font-size: 14px;">
+                    This PO has been reviewed and approved by <strong>${mdApproverName}</strong> on ${mdApprovalDate}
+                  </p>
+                </div>
+
                 <div style="background: #fff8e1; border: 1px solid #f59e0b; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
                   <p style="margin: 0; color: #f59e0b; font-weight: bold;">⚠️ High-Value Approval Required</p>
                   <p style="margin: 10px 0 0 0; color: #666; font-size: 14px;">
-                    This PO exceeds the MD approval threshold and requires your approval.
+                    This PO exceeds the standard approval threshold and requires your final approval.
                   </p>
                 </div>
                 
                 <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
-                  This purchase order has been approved by MD and requires your final approval:
+                  This purchase order requires your final approval:
                 </p>
                 
                 <div style="background: white; border-left: 4px solid #f97316; padding: 20px; margin-bottom: 20px;">
@@ -730,6 +753,10 @@ serve(async (req) => {
                       <td style="padding: 8px 0; text-align: right;">${po.property.name}</td>
                     </tr>
                     ` : ''}
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>MD Approval:</strong></td>
+                      <td style="padding: 8px 0; text-align: right; color: #059669;">✓ ${mdApproverName} (${mdApprovalDate})</td>
+                    </tr>
                   </table>
                 </div>
                 

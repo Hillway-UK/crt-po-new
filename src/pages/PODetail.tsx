@@ -94,9 +94,13 @@ export default function PODetail() {
       const useCustomWorkflows = settings?.use_custom_workflows ?? false;
       const poAmount = Number(po.amount_inc_vat);
 
-      // Get custom workflow steps if enabled
-      let workflowSteps: { role: string; min_amount?: number; max_amount?: number }[] = [];
+      // Determine if there's a next step after current approval using HIERARCHICAL logic
+      let nextStatus: POStatus | null = null;
+      let nextEmailType: string | null = null;
+      let nextApproverRole: string | null = null;
+
       if (useCustomWorkflows) {
+        // Get workflow steps
         const { data: workflows } = await supabase
           .from('approval_workflows')
           .select(`*, steps:approval_workflow_steps(*)`)
@@ -107,48 +111,44 @@ export default function PODetail() {
           .single();
 
         if (workflows?.steps) {
-          workflowSteps = (workflows.steps as any[])
-            .filter(step => {
-              if (step.min_amount && poAmount < step.min_amount) return false;
-              if (step.max_amount && poAmount > step.max_amount) return false;
-              return true;
-            })
-            .sort((a, b) => a.step_order - b.step_order)
-            .map(step => ({ role: step.approver_role, min_amount: step.min_amount, max_amount: step.max_amount }));
-        }
-      }
-
-      // Determine if there's a next step after current approval
-      let nextStatus: POStatus | null = null;
-      let nextEmailType: string | null = null;
-      let nextApproverRole: string | null = null;
-
-      if (useCustomWorkflows && workflowSteps.length > 0) {
-        // Find current step index based on PO status
-        const currentRoleMap: Record<string, string> = {
-          'PENDING_PM_APPROVAL': 'PROPERTY_MANAGER',
-          'PENDING_MD_APPROVAL': 'MD',
-          'PENDING_CEO_APPROVAL': 'CEO',
-        };
-        const currentRole = currentRoleMap[po.status] || '';
-        const currentStepIndex = workflowSteps.findIndex(s => s.role === currentRole);
-        
-        // Check if there's a next step
-        if (currentStepIndex >= 0 && currentStepIndex < workflowSteps.length - 1) {
-          const nextStep = workflowSteps[currentStepIndex + 1];
-          nextApproverRole = nextStep.role;
+          const sortedSteps = (workflows.steps as any[]).sort((a, b) => a.step_order - b.step_order);
           
-          if (nextStep.role === 'MD') {
-            nextStatus = 'PENDING_MD_APPROVAL';
-            nextEmailType = 'po_approval_request';
-          } else if (nextStep.role === 'CEO') {
-            nextStatus = 'PENDING_CEO_APPROVAL';
-            nextEmailType = 'po_ceo_approval_request';
+          // Find which step this amount targets (highest step where amount >= min_amount)
+          let targetStep = sortedSteps.find(step => {
+            const meetsMin = !step.min_amount || poAmount >= step.min_amount;
+            const withinMax = !step.max_amount || poAmount <= step.max_amount;
+            return meetsMin && withinMax;
+          });
+
+          // If no exact match, find highest applicable step
+          if (!targetStep) {
+            for (let i = sortedSteps.length - 1; i >= 0; i--) {
+              if (!sortedSteps[i].min_amount || poAmount >= sortedSteps[i].min_amount) {
+                targetStep = sortedSteps[i];
+                break;
+              }
+            }
+          }
+
+          // Build hierarchical chain and determine next step
+          if (targetStep) {
+            // If target is CEO and current status is MD approval, route to CEO next
+            if (targetStep.approver_role === 'CEO' && po.status === 'PENDING_MD_APPROVAL') {
+              nextStatus = 'PENDING_CEO_APPROVAL';
+              nextEmailType = 'po_ceo_approval_request';
+              nextApproverRole = 'CEO';
+            }
+            // If target is MD and current status is PM approval, route to MD next
+            else if ((targetStep.approver_role === 'MD' || targetStep.approver_role === 'CEO') && po.status === 'PENDING_PM_APPROVAL') {
+              nextStatus = 'PENDING_MD_APPROVAL';
+              nextEmailType = 'po_approval_request';
+              nextApproverRole = 'MD';
+            }
           }
         }
       } else {
         // Default workflow: Check if CEO approval is required (MD approving high-value PO)
-        if (po.status === 'PENDING_MD_APPROVAL' && poAmount > ceoThreshold && user.role !== 'CEO') {
+        if (po.status === 'PENDING_MD_APPROVAL' && poAmount >= ceoThreshold && user.role !== 'CEO') {
           nextStatus = 'PENDING_CEO_APPROVAL';
           nextEmailType = 'po_ceo_approval_request';
           nextApproverRole = 'CEO';

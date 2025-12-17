@@ -767,6 +767,7 @@ export type Database = {
         | "REJECTED"
       po_status:
         | "DRAFT"
+        | "PENDING_PM_APPROVAL"
         | "PENDING_MD_APPROVAL"
         | "PENDING_CEO_APPROVAL"
         | "APPROVED"
@@ -919,6 +920,7 @@ export const Constants = {
       ],
       po_status: [
         "DRAFT",
+        "PENDING_PM_APPROVAL",
         "PENDING_MD_APPROVAL",
         "PENDING_CEO_APPROVAL",
         "APPROVED",
