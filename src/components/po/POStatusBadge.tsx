@@ -6,18 +6,14 @@ interface POStatusBadgeProps {
 }
 
 export function POStatusBadge({ status }: POStatusBadgeProps) {
-  const config: Record<POStatus, { label: string; className: string }> = {
+  const config = {
     DRAFT: {
       label: 'Draft',
-      className: 'bg-muted text-muted-foreground hover:bg-muted',
+      className: 'bg-gray-100 text-gray-700 hover:bg-gray-100',
     },
     PENDING_MD_APPROVAL: {
-      label: 'Pending MD',
+      label: 'Pending Approval',
       className: 'bg-amber-100 text-amber-700 hover:bg-amber-100',
-    },
-    PENDING_CEO_APPROVAL: {
-      label: 'Pending CEO',
-      className: 'bg-orange-100 text-orange-700 hover:bg-orange-100',
     },
     APPROVED: {
       label: 'Approved',
@@ -29,7 +25,7 @@ export function POStatusBadge({ status }: POStatusBadgeProps) {
     },
     CANCELLED: {
       label: 'Cancelled',
-      className: 'bg-muted text-muted-foreground hover:bg-muted',
+      className: 'bg-gray-100 text-gray-700 hover:bg-gray-100',
     },
   };
 

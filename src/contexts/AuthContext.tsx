@@ -23,10 +23,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         console.log('Auth state changed:', { event, session: !!session, userId: session?.user?.id });
         setSession(session);
-
+        
         if (session?.user) {
           // Fetch user profile with fallback creation
           setTimeout(async () => {
@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       console.log('Initial session check:', { session: !!session, userId: session?.user?.id });
       setSession(session);
-
+      
       if (session?.user) {
         await fetchOrCreateUserProfile(session.user.id, session.user.email || '', session.user.user_metadata?.full_name);
       } else {
@@ -56,14 +56,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchOrCreateUserProfile = async (userId: string, email: string, fullName?: string) => {
     console.log('Fetching user profile for:', userId);
-
+    
     // Try to fetch existing profile
     const { data: existingProfile, error: fetchError } = await supabase
       .from('users')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
-
+    
     console.log('User profile result:', { profile: !!existingProfile, error: fetchError });
 
     if (existingProfile) {
@@ -86,17 +86,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .select()
       .single();
-
+    
     if (insertError) {
       console.error('Failed to create user profile:', insertError);
-
+      
       // One more attempt to fetch in case of race condition
       const { data: retryProfile } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
-
+      
       if (retryProfile) {
         setUser(retryProfile as User);
       }
@@ -104,7 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('Created fallback profile successfully');
       setUser(newProfile as User);
     }
-
+    
     setLoading(false);
   };
 
@@ -118,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, fullName: string) => {
     const redirectUrl = `${window.location.origin}/`;
-
+    
     const { error } = await supabase.auth.signUp({
       email,
       password,
