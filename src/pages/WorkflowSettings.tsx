@@ -390,9 +390,9 @@ export default function WorkflowSettings() {
                                       Step {step.step_order}:
                                     </span>
                                     {getRoleBadge(step.approver_role)}
-                                    {step.skip_if_below_amount && (
+                                    {(step.min_amount !== null || step.max_amount !== null) && (
                                       <span className="text-xs text-muted-foreground">
-                                        (skip if &lt; {formatCurrency(step.skip_if_below_amount)})
+                                        ({step.min_amount !== null ? formatCurrency(step.min_amount) : '£0'} - {step.max_amount !== null ? formatCurrency(step.max_amount) : '∞'})
                                       </span>
                                     )}
                                     <Button
@@ -451,17 +451,31 @@ export default function WorkflowSettings() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>Skip if Amount Below (£)</Label>
-                <Input
-                  type="number"
-                  placeholder="Leave empty for no threshold"
-                  value={newStep.skip_if_below_amount}
-                  onChange={(e) => setNewStep({ ...newStep, skip_if_below_amount: e.target.value })}
-                />
-                <p className="text-xs text-muted-foreground">
-                  This step will be skipped if the PO amount is below this value
-                </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Minimum Amount (£)</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g., 0"
+                    value={newStep.min_amount}
+                    onChange={(e) => setNewStep({ ...newStep, min_amount: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Lower bound of the interval
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Maximum Amount (£)</Label>
+                  <Input
+                    type="number"
+                    placeholder="No limit"
+                    value={newStep.max_amount}
+                    onChange={(e) => setNewStep({ ...newStep, max_amount: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Upper bound (empty = unlimited)
+                  </p>
+                </div>
               </div>
             </div>
             <DialogFooter>
