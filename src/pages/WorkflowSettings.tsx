@@ -68,6 +68,15 @@ export default function WorkflowSettings() {
     max_amount: '',
   });
 
+  // Edit step state
+  const [editStepDialogOpen, setEditStepDialogOpen] = useState(false);
+  const [editingStep, setEditingStep] = useState<{ id: string; step_order: number; approver_role: UserRole; min_amount: number | null; max_amount: number | null } | null>(null);
+  const [editStepValues, setEditStepValues] = useState({
+    approver_role: 'MD' as UserRole,
+    min_amount: '',
+    max_amount: '',
+  });
+
   const [autoApproveAmount, setAutoApproveAmount] = useState('');
   const [ceoThresholdAmount, setCeoThresholdAmount] = useState('');
 
@@ -144,6 +153,35 @@ export default function WorkflowSettings() {
     });
     setAddStepDialogOpen(false);
     setSelectedWorkflowForStep(null);
+  };
+
+  const handleEditStep = (step: { id: string; step_order: number; approver_role: UserRole; min_amount?: number | null; max_amount?: number | null }) => {
+    setEditingStep({
+      id: step.id,
+      step_order: step.step_order,
+      approver_role: step.approver_role,
+      min_amount: step.min_amount ?? null,
+      max_amount: step.max_amount ?? null,
+    });
+    setEditStepValues({
+      approver_role: step.approver_role,
+      min_amount: step.min_amount?.toString() || '',
+      max_amount: step.max_amount?.toString() || '',
+    });
+    setEditStepDialogOpen(true);
+  };
+
+  const handleSaveStep = async () => {
+    if (!editingStep) return;
+
+    await updateWorkflowStep(editingStep.id, {
+      approver_role: editStepValues.approver_role,
+      min_amount: editStepValues.min_amount ? parseFloat(editStepValues.min_amount) : null,
+      max_amount: editStepValues.max_amount ? parseFloat(editStepValues.max_amount) : null,
+    });
+
+    setEditStepDialogOpen(false);
+    setEditingStep(null);
   };
 
   const getRoleBadge = (role: UserRole) => {
@@ -398,6 +436,14 @@ export default function WorkflowSettings() {
                                     <Button
                                       size="sm"
                                       variant="ghost"
+                                      className="h-5 w-5 p-0 text-muted-foreground hover:text-primary"
+                                      onClick={() => handleEditStep(step)}
+                                    >
+                                      <Edit2 className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
                                       className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
                                       onClick={() => deleteWorkflowStep(step.id)}
                                     >
@@ -483,6 +529,74 @@ export default function WorkflowSettings() {
                 Cancel
               </Button>
               <Button onClick={handleAddStep}>Add Step</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Step Dialog */}
+        <Dialog open={editStepDialogOpen} onOpenChange={setEditStepDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Approval Step</DialogTitle>
+              <DialogDescription>
+                Modify the approval step configuration
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Approver Role</Label>
+                <Select
+                  value={editStepValues.approver_role}
+                  onValueChange={(value) => setEditStepValues({ ...editStepValues, approver_role: value as UserRole })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROLE_OPTIONS.map(role => (
+                      <SelectItem key={role.value} value={role.value}>
+                        <div className="flex items-center gap-2">
+                          {role.icon}
+                          {role.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Minimum Amount (£)</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g., 0"
+                    value={editStepValues.min_amount}
+                    onChange={(e) => setEditStepValues({ ...editStepValues, min_amount: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Lower bound of the interval
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Maximum Amount (£)</Label>
+                  <Input
+                    type="number"
+                    placeholder="No limit"
+                    value={editStepValues.max_amount}
+                    onChange={(e) => setEditStepValues({ ...editStepValues, max_amount: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Upper bound (empty = unlimited)
+                  </p>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditStepDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveStep}>Save Changes</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
