@@ -321,17 +321,19 @@ export function useApprovalWorkflow() {
     const targetStep = sortedSteps[targetStepIndex];
     const approvalChain: { role: UserRole; required: boolean }[] = [];
 
-    // Check if target step requires previous approval
-    // Default: step_order > 1 requires previous approval (unless explicitly set to false)
-    const requiresPrevious = targetStep.requires_previous_approval ?? (targetStep.step_order > 1);
+    // Check if target step EXPLICITLY requires previous approval
+    // Only chain if requires_previous_approval is explicitly true AND prev step is not PM
+    const requiresPrevious = targetStep.requires_previous_approval === true;
 
     if (requiresPrevious && targetStepIndex > 0) {
-      // Include the previous step in the chain
       const prevStep = sortedSteps[targetStepIndex - 1];
-      approvalChain.push({ 
-        role: prevStep.approver_role, 
-        required: prevStep.is_required ?? true 
-      });
+      // Only include previous step if it's NOT PM (PM is lowest tier, never chains upward)
+      if (prevStep.approver_role !== 'PROPERTY_MANAGER') {
+        approvalChain.push({ 
+          role: prevStep.approver_role, 
+          required: prevStep.is_required ?? true 
+        });
+      }
     }
 
     // Add target step to the chain
