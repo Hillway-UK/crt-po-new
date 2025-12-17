@@ -257,6 +257,7 @@ export function useApprovalWorkflow() {
   };
 
   // Determine which approval steps apply based on PO amount
+  // Uses HIERARCHICAL approval: for high-value POs, MD must approve before CEO
   const getApplicableSteps = useCallback((amount: number, workflowType: 'PO' | 'INVOICE' = 'PO') => {
     if (!workflowSettings.use_custom_workflows) {
       // Default workflow logic
@@ -279,27 +280,66 @@ export function useApprovalWorkflow() {
       return steps;
     }
 
-    // Custom workflow logic
+    // Custom workflow logic - HIERARCHICAL APPROACH
     const defaultWorkflow = workflows.find(
       w => w.workflow_type === workflowType && w.is_default && w.is_active
     );
 
-    if (!defaultWorkflow?.steps) {
+    if (!defaultWorkflow?.steps || defaultWorkflow.steps.length === 0) {
       return [{ role: 'MD' as UserRole, required: true }];
     }
 
-    return defaultWorkflow.steps
-      .filter(step => {
-        if (step.skip_if_below_amount && amount < step.skip_if_below_amount) return false;
-        if (step.min_amount && amount < step.min_amount) return false;
-        if (step.max_amount && amount > step.max_amount) return false;
-        return true;
-      })
-      .sort((a, b) => a.step_order - b.step_order)
-      .map(step => ({
-        role: step.approver_role,
-        required: step.is_required,
-      }));
+    // Sort steps by step_order
+    const sortedSteps = [...defaultWorkflow.steps].sort((a, b) => a.step_order - b.step_order);
+
+    // Find which step the amount falls into (the target step)
+    let targetStep = sortedSteps.find(step => {
+      const meetsMin = !step.min_amount || amount >= step.min_amount;
+      const withinMax = !step.max_amount || amount <= step.max_amount;
+      return meetsMin && withinMax;
+    });
+
+    // If no exact match, find the highest step where amount meets min_amount
+    if (!targetStep) {
+      for (let i = sortedSteps.length - 1; i >= 0; i--) {
+        const step = sortedSteps[i];
+        if (!step.min_amount || amount >= step.min_amount) {
+          targetStep = step;
+          break;
+        }
+      }
+    }
+
+    // Fallback to MD if still no match
+    if (!targetStep) {
+      return [{ role: 'MD' as UserRole, required: true }];
+    }
+
+    // Build HIERARCHICAL approval chain
+    // If target is CEO, include MD first (MD → CEO)
+    // If target is MD, just MD
+    // If target is PM, just PM
+    const approvalChain: { role: UserRole; required: boolean }[] = [];
+
+    if (targetStep.approver_role === 'CEO') {
+      // CEO needs MD approval first - hierarchical
+      const mdStep = sortedSteps.find(s => s.approver_role === 'MD');
+      if (mdStep) {
+        approvalChain.push({ role: 'MD', required: true });
+      }
+      approvalChain.push({ role: 'CEO', required: targetStep.is_required ?? true });
+    } else if (targetStep.approver_role === 'MD') {
+      // MD range - just MD needed
+      approvalChain.push({ role: 'MD', required: targetStep.is_required ?? true });
+    } else if (targetStep.approver_role === 'PROPERTY_MANAGER') {
+      // PM range - just PM needed
+      approvalChain.push({ role: 'PROPERTY_MANAGER', required: targetStep.is_required ?? true });
+    } else {
+      // Any other role
+      approvalChain.push({ role: targetStep.approver_role, required: targetStep.is_required ?? true });
+    }
+
+    return approvalChain;
   }, [workflowSettings, workflows]);
 
   return {
