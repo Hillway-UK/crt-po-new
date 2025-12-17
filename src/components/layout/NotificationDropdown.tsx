@@ -47,7 +47,7 @@ export function NotificationDropdown() {
       return data || [];
     },
     enabled: !!user?.id,
-    refetchInterval: 30000,
+    refetchInterval: 30000, // Refetch every 30 seconds
   });
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;

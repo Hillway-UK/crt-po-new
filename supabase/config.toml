@@ -1,1 +1,7 @@
-project_id = "zwrxmjsaxehodqsnbluc"
+project_id = "rvfwhfgfgjumghfzmvie"
+
+[functions.send-email]
+verify_jwt = false
+
+[functions.generate-po-pdf]
+verify_jwt = false

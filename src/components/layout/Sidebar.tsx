@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import crtLogo from '@/assets/crt_property.png';
 
 export function Sidebar() {
   const { user, signOut } = useAuth();
@@ -27,7 +28,7 @@ export function Sidebar() {
     <aside className="w-64 bg-sidebar text-sidebar-foreground flex flex-col">
       {/* Logo */}
       <div className="p-6 border-b border-sidebar-border">
-        <h2 className="text-xl font-bold text-sidebar-foreground">CRT Property</h2>
+        <img src={crtLogo} alt="CRT Property" className="h-10 object-contain brightness-0 invert mb-2" />
         <p className="text-xs text-sidebar-foreground/70 mt-1">Approvals Hub</p>
       </div>
 
@@ -61,7 +62,7 @@ export function Sidebar() {
         </div>
         <Button
           variant="outline"
-          className="w-full justify-start border-sidebar-border text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="w-full justify-start border-sidebar-border text-crt-purple hover:bg-sidebar-accent hover:text-white"
           onClick={signOut}
         >
           <LogOut className="mr-2 h-4 w-4" />

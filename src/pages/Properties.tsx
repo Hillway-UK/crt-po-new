@@ -1,99 +1,420 @@
-import { useQuery } from '@tanstack/react-query';
-import { MainLayout } from '@/components/layout/MainLayout';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Search, MapPin, Hash } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState } from 'react';
-import type { Property } from '@/types';
+import { supabase } from '@/integrations/supabase/client';
+import { MainLayout } from '@/components/layout/MainLayout';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { Plus, Search, Pencil, Building, ToggleLeft, ToggleRight, Loader2, Upload } from 'lucide-react';
+
+interface Property {
+  id: string;
+  name: string;
+  address: string;
+  reference_code: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+}
 
 export default function Properties() {
   const { user } = useAuth();
-  const [search, setSearch] = useState('');
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [csvDialogOpen, setCsvDialogOpen] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const { data: properties = [], isLoading } = useQuery({
-    queryKey: ['properties'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('*')
-        .order('name');
-
-      if (error) throw error;
-      return data as Property[];
-    },
-    enabled: !!user,
+  const [formData, setFormData] = useState({
+    name: '',
+    address: '',
+    reference_code: '',
+    notes: ''
   });
 
-  const filteredProperties = properties.filter(property => 
-    property.name.toLowerCase().includes(search.toLowerCase()) ||
-    property.address.toLowerCase().includes(search.toLowerCase()) ||
-    property.reference_code?.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    fetchProperties();
+  }, []);
+
+  async function fetchProperties() {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('properties')
+      .select('*')
+      .order('name');
+    
+    if (error) {
+      toast.error('Failed to load properties');
+      console.error(error);
+    } else {
+      setProperties(data || []);
+    }
+    setLoading(false);
+  }
+
+  const filteredProperties = properties.filter(p => {
+    const matchesSearch = 
+      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.reference_code?.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    const matchesFilter = 
+      filterActive === 'all' ||
+      (filterActive === 'active' && p.is_active) ||
+      (filterActive === 'inactive' && !p.is_active);
+    
+    return matchesSearch && matchesFilter;
+  });
+
+  function openAddDialog() {
+    setEditingProperty(null);
+    setFormData({ name: '', address: '', reference_code: '', notes: '' });
+    setDialogOpen(true);
+  }
+
+  function openEditDialog(property: Property) {
+    setEditingProperty(property);
+    setFormData({
+      name: property.name,
+      address: property.address,
+      reference_code: property.reference_code || '',
+      notes: property.notes || ''
+    });
+    setDialogOpen(true);
+  }
+
+  async function handleSave() {
+    if (!formData.name.trim() || !formData.address.trim()) {
+      toast.error('Property name and address are required');
+      return;
+    }
+
+    setSaving(true);
+
+    const propertyData = {
+      name: formData.name.trim(),
+      address: formData.address.trim(),
+      reference_code: formData.reference_code.trim() || null,
+      notes: formData.notes.trim() || null,
+      organisation_id: user?.organisation_id
+    };
+
+    if (editingProperty) {
+      const { error } = await supabase
+        .from('properties')
+        .update(propertyData)
+        .eq('id', editingProperty.id);
+
+      if (error) {
+        toast.error('Failed to update property');
+        console.error(error);
+      } else {
+        toast.success('Property updated');
+        setDialogOpen(false);
+        fetchProperties();
+      }
+    } else {
+      const { error } = await supabase
+        .from('properties')
+        .insert(propertyData);
+
+      if (error) {
+        toast.error('Failed to add property');
+        console.error(error);
+      } else {
+        toast.success('Property added');
+        setDialogOpen(false);
+        fetchProperties();
+      }
+    }
+
+    setSaving(false);
+  }
+
+  async function toggleActive(property: Property) {
+    const { error } = await supabase
+      .from('properties')
+      .update({ is_active: !property.is_active })
+      .eq('id', property.id);
+
+    if (error) {
+      toast.error('Failed to update property');
+    } else {
+      toast.success(property.is_active ? 'Property deactivated' : 'Property activated');
+      fetchProperties();
+    }
+  }
+
+  async function handleCSVImport(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        toast.error('CSV must have header row and at least one data row');
+        return;
+      }
+
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
+      
+      const nameIdx = headers.findIndex(h => h.includes('name') && !h.includes('ref'));
+      const addressIdx = headers.findIndex(h => h.includes('address'));
+      const refIdx = headers.findIndex(h => h.includes('ref') || h.includes('code'));
+      const notesIdx = headers.findIndex(h => h.includes('note'));
+
+      if (nameIdx === -1 || addressIdx === -1) {
+        toast.error('CSV must have "name" and "address" columns');
+        return;
+      }
+
+      const propertiesToImport = [];
+      let errors = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        
+        const name = values[nameIdx];
+        const address = values[addressIdx];
+
+        if (!name || !address) {
+          errors++;
+          continue;
+        }
+
+        propertiesToImport.push({
+          name,
+          address,
+          reference_code: refIdx > -1 ? values[refIdx] || null : null,
+          notes: notesIdx > -1 ? values[notesIdx] || null : null,
+          organisation_id: user?.organisation_id,
+          is_active: true
+        });
+      }
+
+      if (propertiesToImport.length === 0) {
+        toast.error('No valid properties found in CSV');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('properties')
+        .insert(propertiesToImport);
+
+      if (error) {
+        toast.error('Failed to import: ' + error.message);
+      } else {
+        toast.success(`Imported ${propertiesToImport.length} properties` + (errors > 0 ? ` (${errors} rows skipped)` : ''));
+        fetchProperties();
+      }
+
+      setCsvDialogOpen(false);
+      event.target.value = '';
+    };
+
+    reader.readAsText(file);
+  }
 
   return (
     <MainLayout title="Properties">
       <div className="space-y-6">
-        <div className="flex gap-4">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search properties..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
-            />
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Properties</h1>
+            <p className="text-muted-foreground">Manage properties for purchase order allocation</p>
+          </div>
+          <div className="flex gap-2">
+            <Dialog open={csvDialogOpen} onOpenChange={setCsvDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Import CSV
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Import Properties from CSV</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <p className="text-sm text-muted-foreground">
+                    Upload a CSV with property details. Required: <strong>name</strong>, <strong>address</strong>.
+                    Optional: reference_code, notes.
+                  </p>
+                  <Input type="file" accept=".csv" onChange={handleCSVImport} />
+                  <p className="text-xs text-muted-foreground">
+                    Example: name,address,reference_code<br/>
+                    Waterside Park,Valley Way Wombwell S73 0BB,WP001
+                  </p>
+                </div>
+              </DialogContent>
+            </Dialog>
+            
+            <Button onClick={openAddDialog} className="bg-primary hover:bg-primary/90">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Property
+            </Button>
           </div>
         </div>
 
-        {isLoading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="text-muted-foreground">Loading...</div>
-          </div>
-        ) : filteredProperties.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <p className="text-muted-foreground">No properties found</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredProperties.map((property) => (
-              <Card key={property.id} className="hover:shadow-md transition-shadow">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <h3 className="font-semibold text-lg">{property.name}</h3>
-                    <Badge variant={property.is_active ? 'default' : 'secondary'}>
-                      {property.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </div>
+        {/* Search & Filter */}
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search properties..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <select
+                value={filterActive}
+                onChange={(e) => setFilterActive(e.target.value as 'all' | 'active' | 'inactive')}
+                className="px-3 py-2 border border-input rounded-md text-sm bg-background"
+              >
+                <option value="all">All Properties</option>
+                <option value="active">Active Only</option>
+                <option value="inactive">Inactive Only</option>
+              </select>
+            </div>
+          </CardContent>
+        </Card>
 
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-start gap-2 text-muted-foreground">
-                      <MapPin className="h-4 w-4 mt-0.5" />
-                      <span>{property.address}</span>
-                    </div>
+        {/* Properties Table */}
+        <Card>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : filteredProperties.length === 0 ? (
+              <div className="text-center py-12">
+                <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-foreground">No properties found</h3>
+                <p className="text-muted-foreground mt-1">
+                  {properties.length === 0 ? "Add your first property to get started" : "Try adjusting your search"}
+                </p>
+                {properties.length === 0 && (
+                  <Button onClick={openAddDialog} className="mt-4 bg-primary hover:bg-primary/90">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Property
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Property Name</TableHead>
+                    <TableHead>Address</TableHead>
+                    <TableHead>Reference</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredProperties.map((property) => (
+                    <TableRow key={property.id} className="hover:bg-muted/50">
+                      <TableCell className="font-medium">{property.name}</TableCell>
+                      <TableCell>{property.address}</TableCell>
+                      <TableCell>{property.reference_code || '-'}</TableCell>
+                      <TableCell>
+                        <Badge variant={property.is_active ? 'default' : 'secondary'}>
+                          {property.is_active ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => openEditDialog(property)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => toggleActive(property)}>
+                            {property.is_active ? (
+                              <ToggleRight className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <ToggleLeft className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
 
-                    {property.reference_code && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Hash className="h-4 w-4" />
-                        <span>{property.reference_code}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {property.notes && (
-                    <div className="mt-4 pt-3 border-t text-xs text-muted-foreground">
-                      {property.notes}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+        {/* Add/Edit Dialog */}
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{editingProperty ? 'Edit Property' : 'Add New Property'}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <Label htmlFor="name">Property Name *</Label>
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  placeholder="Waterside Business Park"
+                />
+              </div>
+              <div>
+                <Label htmlFor="address">Address *</Label>
+                <Textarea
+                  id="address"
+                  value={formData.address}
+                  onChange={(e) => setFormData({...formData, address: e.target.value})}
+                  placeholder="Valley Way, Wombwell, Barnsley, S73 0BB"
+                  rows={2}
+                />
+              </div>
+              <div>
+                <Label htmlFor="reference_code">Reference Code</Label>
+                <Input
+                  id="reference_code"
+                  value={formData.reference_code}
+                  onChange={(e) => setFormData({...formData, reference_code: e.target.value})}
+                  placeholder="WBP-001"
+                />
+              </div>
+              <div>
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  value={formData.notes}
+                  onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                  placeholder="Any additional notes..."
+                  rows={2}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving} className="bg-primary hover:bg-primary/90">
+                {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {editingProperty ? 'Update' : 'Add'} Property
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </MainLayout>
   );

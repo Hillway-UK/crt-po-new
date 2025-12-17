@@ -13,6 +13,7 @@ import type { PurchaseOrder } from '@/types';
 export default function Dashboard() {
   const { user } = useAuth();
 
+  // Loading or no user - show loading state
   if (!user) {
     return (
       <MainLayout title="Dashboard">
@@ -23,22 +24,32 @@ export default function Dashboard() {
     );
   }
 
+  // Property Manager Dashboard
   if (user.role === 'PROPERTY_MANAGER') {
     return <PMDashboard user={user} />;
   }
 
-  if (user.role === 'MD' || user.role === 'CEO') {
+  // MD Dashboard
+  if (user.role === 'MD') {
     return <MDDashboard user={user} />;
   }
 
+  // CEO Dashboard (same as MD - approval focused)
+  if (user.role === 'CEO') {
+    return <MDDashboard user={user} />;
+  }
+
+  // Accounts Dashboard
   if (user.role === 'ACCOUNTS') {
     return <AccountsDashboard user={user} />;
   }
 
+  // Admin Dashboard
   if (user.role === 'ADMIN') {
     return <AdminDashboard user={user} />;
   }
 
+  // Default to PM Dashboard
   return <PMDashboard user={user} />;
 }
 
@@ -103,7 +114,7 @@ function PMDashboard({ user }: { user: any }) {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats?.pending_pos || 0}</div>
-              <p className="text-xs text-muted-foreground">Awaiting approval</p>
+              <p className="text-xs text-muted-foreground">Awaiting MD approval</p>
             </CardContent>
           </Card>
 
@@ -280,10 +291,10 @@ function AccountsDashboard({ user }: { user: any }) {
             </CardContent>
           </Card>
 
-          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate('/invoices?status=UPLOADED')}>
+          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => window.location.href = '/invoices?status=UPLOADED'}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Needs Matching</CardTitle>
-              <AlertCircle className="h-4 w-4 text-muted-foreground" />
+              <AlertCircle className="h-4 w-4 text-gray-600" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats?.needs_matching || 0}</div>
@@ -291,7 +302,7 @@ function AccountsDashboard({ user }: { user: any }) {
             </CardContent>
           </Card>
 
-          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate('/invoices?status=PENDING_MD_APPROVAL')}>
+          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => window.location.href = '/invoices?status=PENDING_MD_APPROVAL'}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Pending Approval</CardTitle>
               <Clock className="h-4 w-4 text-amber-600" />
@@ -302,7 +313,7 @@ function AccountsDashboard({ user }: { user: any }) {
             </CardContent>
           </Card>
 
-          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate('/invoices?status=APPROVED_FOR_PAYMENT')}>
+          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => window.location.href = '/invoices?status=APPROVED_FOR_PAYMENT'}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Ready to Pay</CardTitle>
               <CheckCircle className="h-4 w-4 text-green-600" />
@@ -398,6 +409,24 @@ function AdminDashboard({ user }: { user: any }) {
             </CardContent>
           </Card>
         </div>
+
+        {stats?.users_by_role && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Users by Role</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {Object.entries(stats.users_by_role).map(([role, count]) => (
+                  <div key={role} className="flex justify-between">
+                    <span className="text-sm capitalize">{role.replace('_', ' ')}</span>
+                    <span className="font-medium">{count as number}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </MainLayout>
   );
