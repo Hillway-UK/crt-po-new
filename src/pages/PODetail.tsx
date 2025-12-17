@@ -83,7 +83,7 @@ export default function PODetail() {
 
     setProcessing(true);
     try {
-      // Get workflow settings to check CEO threshold
+      // Get workflow settings to check thresholds
       const { data: settings } = await supabase
         .from('settings')
         .select('use_custom_workflows, require_ceo_above_amount')
@@ -93,45 +93,105 @@ export default function PODetail() {
       const ceoThreshold = settings?.require_ceo_above_amount || 15000;
       const useCustomWorkflows = settings?.use_custom_workflows ?? false;
       const poAmount = Number(po.amount_inc_vat);
-      
-      // Check if CEO approval is required (MD approving high-value PO)
-      const needsCeoApproval = useCustomWorkflows && 
-        po.status === 'PENDING_MD_APPROVAL' && 
-        poAmount > ceoThreshold && 
-        user.role !== 'CEO';
 
-      if (needsCeoApproval) {
-        // Route to CEO for final approval
+      // Get custom workflow steps if enabled
+      let workflowSteps: { role: string; min_amount?: number; max_amount?: number }[] = [];
+      if (useCustomWorkflows) {
+        const { data: workflows } = await supabase
+          .from('approval_workflows')
+          .select(`*, steps:approval_workflow_steps(*)`)
+          .eq('organisation_id', user.organisation_id)
+          .eq('workflow_type', 'PO')
+          .eq('is_default', true)
+          .eq('is_active', true)
+          .single();
+
+        if (workflows?.steps) {
+          workflowSteps = (workflows.steps as any[])
+            .filter(step => {
+              if (step.min_amount && poAmount < step.min_amount) return false;
+              if (step.max_amount && poAmount > step.max_amount) return false;
+              return true;
+            })
+            .sort((a, b) => a.step_order - b.step_order)
+            .map(step => ({ role: step.approver_role, min_amount: step.min_amount, max_amount: step.max_amount }));
+        }
+      }
+
+      // Determine if there's a next step after current approval
+      let nextStatus: POStatus | null = null;
+      let nextEmailType: string | null = null;
+      let nextApproverRole: string | null = null;
+
+      if (useCustomWorkflows && workflowSteps.length > 0) {
+        // Find current step index based on PO status
+        const currentRoleMap: Record<string, string> = {
+          'PENDING_PM_APPROVAL': 'PROPERTY_MANAGER',
+          'PENDING_MD_APPROVAL': 'MD',
+          'PENDING_CEO_APPROVAL': 'CEO',
+        };
+        const currentRole = currentRoleMap[po.status] || '';
+        const currentStepIndex = workflowSteps.findIndex(s => s.role === currentRole);
+        
+        // Check if there's a next step
+        if (currentStepIndex >= 0 && currentStepIndex < workflowSteps.length - 1) {
+          const nextStep = workflowSteps[currentStepIndex + 1];
+          nextApproverRole = nextStep.role;
+          
+          if (nextStep.role === 'MD') {
+            nextStatus = 'PENDING_MD_APPROVAL';
+            nextEmailType = 'po_approval_request';
+          } else if (nextStep.role === 'CEO') {
+            nextStatus = 'PENDING_CEO_APPROVAL';
+            nextEmailType = 'po_ceo_approval_request';
+          }
+        }
+      } else {
+        // Default workflow: Check if CEO approval is required (MD approving high-value PO)
+        if (po.status === 'PENDING_MD_APPROVAL' && poAmount > ceoThreshold && user.role !== 'CEO') {
+          nextStatus = 'PENDING_CEO_APPROVAL';
+          nextEmailType = 'po_ceo_approval_request';
+          nextApproverRole = 'CEO';
+        }
+      }
+
+      if (nextStatus) {
+        // Route to next approver
         const { error: updateError } = await supabase
           .from('purchase_orders')
-          .update({ status: 'PENDING_CEO_APPROVAL' })
+          .update({ status: nextStatus as any }) // Cast needed until DB types are regenerated
           .eq('id', po.id);
 
         if (updateError) throw updateError;
 
-        // Log MD approval action
+        // Log approval action
+        const roleLabel = user.role === 'PROPERTY_MANAGER' ? 'PM' : user.role;
         await supabase.from('po_approval_logs').insert([{
           po_id: po.id,
           action_by_user_id: user.id,
           action: 'APPROVED',
-          comment: 'MD approved - routed to CEO for final approval',
+          comment: `${roleLabel} approved - routed to ${nextApproverRole} for approval`,
         }]);
 
-        // Notify CEO users
-        const { data: ceoUsers } = await supabase
+        // Notify next approver users
+        const rolesToNotify: ('PROPERTY_MANAGER' | 'MD' | 'CEO' | 'ACCOUNTS' | 'ADMIN')[] = 
+          nextApproverRole === 'CEO' ? ['CEO'] : 
+          nextApproverRole === 'MD' ? ['MD', 'ADMIN'] : 
+          ['PROPERTY_MANAGER', 'ADMIN'];
+        const { data: nextApprovers } = await supabase
           .from('users')
           .select('id')
           .eq('organisation_id', user.organisation_id)
-          .eq('role', 'CEO')
+          .in('role', rolesToNotify)
           .eq('is_active', true);
 
-        if (ceoUsers && ceoUsers.length > 0) {
+        if (nextApprovers && nextApprovers.length > 0) {
           await supabase.from('notifications').insert(
-            ceoUsers.map((ceoUser) => ({
-              user_id: ceoUser.id,
+            nextApprovers.map((approver) => ({
+              user_id: approver.id,
               organisation_id: user.organisation_id,
-              type: 'po_pending_ceo_approval',
-              title: 'High-Value PO Requires CEO Approval',
+              type: nextStatus === 'PENDING_CEO_APPROVAL' ? 'po_pending_ceo_approval' : 'po_pending_approval',
+              title: nextStatus === 'PENDING_CEO_APPROVAL' ? 'High-Value PO Requires CEO Approval' : 'PO Requires Approval',
               message: `PO ${po.po_number} (${formatCurrency(poAmount)}) requires your approval`,
               link: `/pos/${po.id}`,
               related_po_id: po.id,
@@ -139,12 +199,14 @@ export default function PODetail() {
           );
         }
 
-        // Send email notification to CEO
-        supabase.functions.invoke('send-email', {
-          body: { type: 'po_ceo_approval_request', po_id: po.id }
-        }).catch(err => console.error('CEO email notification failed:', err));
+        // Send email notification to next approver
+        if (nextEmailType) {
+          supabase.functions.invoke('send-email', {
+            body: { type: nextEmailType, po_id: po.id }
+          }).catch(err => console.error('Email notification failed:', err));
+        }
 
-        toast.success('PO approved by MD - routed to CEO for final approval');
+        toast.success(`PO approved - routed to ${nextApproverRole} for final approval`);
         fetchPO();
         fetchApprovalLogs();
         return;
@@ -366,6 +428,7 @@ export default function PODetail() {
   const getStatusBadge = (status: POStatus) => {
     const variants: Record<POStatus, { label: string; className: string }> = {
       DRAFT: { label: 'Draft', className: 'bg-gray-100 text-gray-700 text-lg px-4 py-1' },
+      PENDING_PM_APPROVAL: { label: 'Pending PM Approval', className: 'bg-blue-100 text-blue-700 text-lg px-4 py-1' },
       PENDING_MD_APPROVAL: { label: 'Pending MD Approval', className: 'bg-amber-100 text-amber-700 text-lg px-4 py-1' },
       PENDING_CEO_APPROVAL: { label: 'Pending CEO Approval', className: 'bg-orange-100 text-orange-700 text-lg px-4 py-1' },
       APPROVED: { label: 'Approved', className: 'bg-green-100 text-green-700 text-lg px-4 py-1' },
@@ -401,8 +464,10 @@ export default function PODetail() {
   }
 
   const canEdit = (po.status === 'DRAFT' || po.status === 'REJECTED') && po.created_by_user_id === user?.id;
-  const canApprove = (po.status === 'PENDING_MD_APPROVAL' && (user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN')) ||
-                     (po.status === 'PENDING_CEO_APPROVAL' && (user?.role === 'CEO' || user?.role === 'ADMIN'));
+  const canApprove = 
+    (po.status === 'PENDING_PM_APPROVAL' && (user?.role === 'PROPERTY_MANAGER' || user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN')) ||
+    (po.status === 'PENDING_MD_APPROVAL' && (user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN')) ||
+    (po.status === 'PENDING_CEO_APPROVAL' && (user?.role === 'CEO' || user?.role === 'ADMIN'));
 
   return (
     <MainLayout title={`Purchase Order ${po.po_number}`}>
