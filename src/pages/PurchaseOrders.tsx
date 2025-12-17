@@ -113,6 +113,7 @@ export default function PurchaseOrders() {
   const getStatusBadge = (status: POStatus) => {
     const variants: Record<POStatus, { label: string; className: string }> = {
       DRAFT: { label: 'Draft', className: 'bg-gray-100 text-gray-700' },
+      PENDING_PM_APPROVAL: { label: 'Pending PM', className: 'bg-blue-100 text-blue-700' },
       PENDING_MD_APPROVAL: { label: 'Pending MD', className: 'bg-amber-100 text-amber-700' },
       PENDING_CEO_APPROVAL: { label: 'Pending CEO', className: 'bg-orange-100 text-orange-700' },
       APPROVED: { label: 'Approved', className: 'bg-green-100 text-green-700' },

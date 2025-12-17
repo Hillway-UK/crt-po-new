@@ -10,9 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ContractorDialog } from '@/components/contractors/ContractorDialog';
-import { Contractor, Property } from '@/types';
+import { Contractor, Property, POStatus, UserRole } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useApprovalWorkflow } from '@/hooks/useApprovalWorkflow';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { Plus } from 'lucide-react';
@@ -30,6 +31,7 @@ const purchaseOrderSchema = z.object({
 export default function CreatePO() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { getApplicableSteps, workflowSettings, loading: workflowLoading } = useApprovalWorkflow();
   const [loading, setLoading] = useState(false);
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -96,6 +98,31 @@ export default function CreatePO() {
     return amount + calculateVAT();
   };
 
+  // Determine the initial status and first approver role based on workflow
+  const getInitialApprovalInfo = (amount: number): { status: POStatus; approverRole: UserRole | null; emailType: string } => {
+    const steps = getApplicableSteps(amount, 'PO');
+    
+    // If no steps required (auto-approve scenario), directly approve
+    if (steps.length === 0) {
+      return { status: 'APPROVED', approverRole: null, emailType: '' };
+    }
+
+    const firstStep = steps[0];
+    
+    // Determine status based on first approver role
+    if (firstStep.role === 'PROPERTY_MANAGER') {
+      return { status: 'PENDING_PM_APPROVAL', approverRole: 'PROPERTY_MANAGER', emailType: 'po_pm_approval_request' };
+    } else if (firstStep.role === 'MD') {
+      return { status: 'PENDING_MD_APPROVAL', approverRole: 'MD', emailType: 'po_approval_request' };
+    } else if (firstStep.role === 'CEO') {
+      // If CEO is first step, still go through MD first unless custom workflow says otherwise
+      return { status: 'PENDING_MD_APPROVAL', approverRole: 'MD', emailType: 'po_approval_request' };
+    }
+    
+    // Default to MD approval
+    return { status: 'PENDING_MD_APPROVAL', approverRole: 'MD', emailType: 'po_approval_request' };
+  };
+
   const handleSubmit = async (submitForApproval: boolean) => {
     setErrors({});
     setLoading(true);
@@ -108,6 +135,9 @@ export default function CreatePO() {
         notes: formData.notes || null,
       });
 
+      // Calculate the total amount including VAT
+      const amountIncVat = validated.amount_ex_vat * (1 + validated.vat_rate / 100);
+
       // Generate PO number
       const { data: poNumber, error: poNumError } = await supabase.rpc('generate_po_number', {
         org_id: user?.organisation_id,
@@ -115,18 +145,30 @@ export default function CreatePO() {
 
       if (poNumError) throw poNumError;
 
+      // Get the initial status and approver based on workflow
+      const { status: initialStatus, approverRole, emailType } = submitForApproval 
+        ? getInitialApprovalInfo(amountIncVat)
+        : { status: 'DRAFT' as POStatus, approverRole: null, emailType: '' };
+
       const poData: any = {
         contractor_id: validated.contractor_id,
         description: validated.description,
         amount_ex_vat: validated.amount_ex_vat,
         vat_rate: validated.vat_rate,
+        amount_inc_vat: amountIncVat, // Include the calculated total
         property_id: validated.property_id,
         notes: validated.notes,
         po_number: poNumber,
         organisation_id: user?.organisation_id,
         created_by_user_id: user?.id,
-        status: submitForApproval ? 'PENDING_MD_APPROVAL' : 'DRAFT',
+        status: initialStatus,
       };
+
+      // If auto-approved, set approval info
+      if (initialStatus === 'APPROVED') {
+        poData.approved_by_user_id = user?.id;
+        poData.approval_date = new Date().toISOString();
+      }
 
       const { data: newPO, error: insertError } = await supabase
         .from('purchase_orders')
@@ -141,53 +183,65 @@ export default function CreatePO() {
         await supabase.from('po_approval_logs').insert([{
           po_id: newPO.id,
           action_by_user_id: user?.id,
-          action: 'SENT_FOR_APPROVAL',
+          action: initialStatus === 'APPROVED' ? 'APPROVED' : 'SENT_FOR_APPROVAL',
+          comment: initialStatus === 'APPROVED' ? 'Auto-approved based on workflow settings' : undefined,
         }]);
 
-        // Send notification email to MD
-        supabase.functions.invoke('send-email', {
-          body: { type: 'po_approval_request', po_id: newPO.id }
-        }).catch(err => {
-          console.error('Email notification failed:', err);
-        });
+        // Only send notifications if not auto-approved
+        if (initialStatus !== 'APPROVED' && emailType) {
+          // Send notification email to the correct approver role
+          supabase.functions.invoke('send-email', {
+            body: { type: emailType, po_id: newPO.id }
+          }).catch(err => {
+            console.error('Email notification failed:', err);
+          });
 
-        // Get MD and ADMIN users and create notifications (exclude self)
-        const { data: mdUsers, error: mdUsersError } = await supabase
-          .from('users')
-          .select('id')
-          .eq('organisation_id', user?.organisation_id)
-          .in('role', ['MD', 'ADMIN'])
-          .eq('is_active', true)
-          .neq('id', user?.id);
+          // Get users with the appropriate role and create notifications
+          const rolesToNotify: ('PROPERTY_MANAGER' | 'MD' | 'CEO' | 'ACCOUNTS' | 'ADMIN')[] = approverRole === 'PROPERTY_MANAGER' 
+            ? ['PROPERTY_MANAGER', 'ADMIN']
+            : approverRole === 'MD' 
+              ? ['MD', 'ADMIN']
+              : ['CEO', 'ADMIN'];
 
-        if (mdUsersError) {
-          console.error('Error fetching MD/ADMIN users:', mdUsersError);
-        }
+          const { data: approverUsers, error: approverUsersError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('organisation_id', user?.organisation_id)
+            .in('role', rolesToNotify)
+            .eq('is_active', true)
+            .neq('id', user?.id);
 
-        if (mdUsers && mdUsers.length > 0) {
-          const { error: notificationError } = await supabase.from('notifications').insert(
-            mdUsers.map((md) => ({
-              user_id: md.id,
-              organisation_id: user?.organisation_id,
-              type: 'po_pending_approval',
-              title: 'New PO requires approval',
-              message: `Purchase Order ${poNumber} has been submitted for your approval`,
-              link: `/pos/${newPO.id}`,
-              related_po_id: newPO.id,
-            }))
-          );
+          if (approverUsersError) {
+            console.error('Error fetching approver users:', approverUsersError);
+          }
 
-          if (notificationError) {
-            console.error('Error creating notifications:', notificationError);
-            toast.error('PO created but notifications may have failed');
+          if (approverUsers && approverUsers.length > 0) {
+            const { error: notificationError } = await supabase.from('notifications').insert(
+              approverUsers.map((approver) => ({
+                user_id: approver.id,
+                organisation_id: user?.organisation_id,
+                type: 'po_pending_approval',
+                title: 'New PO requires approval',
+                message: `Purchase Order ${poNumber} (${formatCurrency(amountIncVat)}) has been submitted for your approval`,
+                link: `/pos/${newPO.id}`,
+                related_po_id: newPO.id,
+              }))
+            );
+
+            if (notificationError) {
+              console.error('Error creating notifications:', notificationError);
+              toast.error('PO created but notifications may have failed');
+            }
           }
         }
       }
 
       toast.success(
-        submitForApproval
-          ? 'Purchase order submitted for approval'
-          : 'Purchase order saved as draft'
+        initialStatus === 'APPROVED'
+          ? 'Purchase order auto-approved based on workflow settings'
+          : submitForApproval
+            ? 'Purchase order submitted for approval'
+            : 'Purchase order saved as draft'
       );
       navigate(`/pos/${newPO.id}`);
     } catch (err) {
@@ -405,7 +459,7 @@ export default function CreatePO() {
                 <Button
                   type="button"
                   onClick={() => handleSubmit(true)}
-                  disabled={loading}
+                  disabled={loading || workflowLoading}
                 >
                   {loading ? 'Submitting...' : 'Submit for Approval'}
                 </Button>
