@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { ApprovalWorkflow, ApprovalWorkflowStep, UserRole } from '@/types';
+import { ApprovalWorkflow, ApprovalWorkflowStep, UserRole, POStatus } from '@/types';
 import { toast } from 'sonner';
 
 interface WorkflowSettings {
@@ -24,7 +24,6 @@ export function useApprovalWorkflow() {
     if (!user?.organisation_id) return;
 
     try {
-      // Using any cast since these tables are new and DB types haven't been regenerated
       const { data, error } = await (supabase as any)
         .from('approval_workflows')
         .select(`
@@ -170,6 +169,7 @@ export function useApprovalWorkflow() {
       max_amount?: number | null;
       skip_if_below_amount?: number | null;
       is_required?: boolean;
+      requires_previous_approval?: boolean;
     }
   ) => {
     try {
@@ -256,23 +256,33 @@ export function useApprovalWorkflow() {
     }
   };
 
-  // Determine which approval steps apply based on PO amount
-  // Uses HIERARCHICAL approval: for high-value POs, MD must approve before CEO
+  /**
+   * DYNAMIC THRESHOLD-BASED APPROVAL LOGIC
+   * 
+   * This function determines which approval steps are required based on the PO amount.
+   * It uses a threshold-based approach where each step has a min_amount (threshold).
+   * 
+   * Logic:
+   * 1. Sort steps by step_order (ascending)
+   * 2. Find the HIGHEST step where amount >= min_amount (threshold)
+   * 3. If that step requires_previous_approval, include the previous step in the chain
+   * 4. Return the approval chain (e.g., [PM], [MD], or [MD, CEO])
+   */
   const getApplicableSteps = useCallback((amount: number, workflowType: 'PO' | 'INVOICE' = 'PO') => {
     if (!workflowSettings.use_custom_workflows) {
-      // Default workflow logic
+      // Default workflow logic (quick thresholds)
       const steps: { role: UserRole; required: boolean }[] = [];
       
-      // Check auto-approve threshold
+      // Check auto-approve threshold (PM can approve directly)
       if (workflowSettings.auto_approve_below_amount && amount < workflowSettings.auto_approve_below_amount) {
-        // Auto-approve - no steps needed (PM can approve directly)
+        steps.push({ role: 'PROPERTY_MANAGER', required: true });
         return steps;
       }
 
-      // MD approval always required for standard flow
+      // MD approval required
       steps.push({ role: 'MD', required: true });
 
-      // CEO approval if above threshold
+      // CEO approval if above threshold (sequential: MD then CEO)
       if (workflowSettings.require_ceo_above_amount && amount >= workflowSettings.require_ceo_above_amount) {
         steps.push({ role: 'CEO', required: true });
       }
@@ -280,7 +290,7 @@ export function useApprovalWorkflow() {
       return steps;
     }
 
-    // Custom workflow logic - HIERARCHICAL APPROACH
+    // CUSTOM WORKFLOW: Dynamic Threshold-Based Logic
     const defaultWorkflow = workflows.find(
       w => w.workflow_type === workflowType && w.is_default && w.is_active
     );
@@ -289,58 +299,163 @@ export function useApprovalWorkflow() {
       return [{ role: 'MD' as UserRole, required: true }];
     }
 
-    // Sort steps by step_order
+    // Sort steps by step_order (ascending)
     const sortedSteps = [...defaultWorkflow.steps].sort((a, b) => a.step_order - b.step_order);
 
-    // Find which step the amount falls into (the target step)
-    let targetStep = sortedSteps.find(step => {
-      const meetsMin = !step.min_amount || amount >= step.min_amount;
-      const withinMax = !step.max_amount || amount <= step.max_amount;
-      return meetsMin && withinMax;
-    });
-
-    // If no exact match, find the highest step where amount meets min_amount
-    if (!targetStep) {
-      for (let i = sortedSteps.length - 1; i >= 0; i--) {
-        const step = sortedSteps[i];
-        if (!step.min_amount || amount >= step.min_amount) {
-          targetStep = step;
-          break;
-        }
+    // Find the HIGHEST step where amount >= min_amount (threshold)
+    let targetStepIndex = -1;
+    for (let i = 0; i < sortedSteps.length; i++) {
+      const step = sortedSteps[i];
+      const threshold = step.min_amount || 0;
+      
+      if (amount >= threshold) {
+        targetStepIndex = i;
       }
     }
 
-    // Fallback to MD if still no match
-    if (!targetStep) {
-      return [{ role: 'MD' as UserRole, required: true }];
+    // Fallback to first step if no match
+    if (targetStepIndex === -1) {
+      targetStepIndex = 0;
     }
 
-    // Build HIERARCHICAL approval chain
-    // If target is CEO, include MD first (MD → CEO)
-    // If target is MD, just MD
-    // If target is PM, just PM
+    const targetStep = sortedSteps[targetStepIndex];
     const approvalChain: { role: UserRole; required: boolean }[] = [];
 
-    if (targetStep.approver_role === 'CEO') {
-      // CEO needs MD approval first - hierarchical
-      const mdStep = sortedSteps.find(s => s.approver_role === 'MD');
-      if (mdStep) {
-        approvalChain.push({ role: 'MD', required: true });
-      }
-      approvalChain.push({ role: 'CEO', required: targetStep.is_required ?? true });
-    } else if (targetStep.approver_role === 'MD') {
-      // MD range - just MD needed
-      approvalChain.push({ role: 'MD', required: targetStep.is_required ?? true });
-    } else if (targetStep.approver_role === 'PROPERTY_MANAGER') {
-      // PM range - just PM needed
-      approvalChain.push({ role: 'PROPERTY_MANAGER', required: targetStep.is_required ?? true });
-    } else {
-      // Any other role
-      approvalChain.push({ role: targetStep.approver_role, required: targetStep.is_required ?? true });
+    // Check if target step requires previous approval
+    // Default: step_order > 1 requires previous approval (unless explicitly set to false)
+    const requiresPrevious = targetStep.requires_previous_approval ?? (targetStep.step_order > 1);
+
+    if (requiresPrevious && targetStepIndex > 0) {
+      // Include the previous step in the chain
+      const prevStep = sortedSteps[targetStepIndex - 1];
+      approvalChain.push({ 
+        role: prevStep.approver_role, 
+        required: prevStep.is_required ?? true 
+      });
     }
+
+    // Add target step to the chain
+    approvalChain.push({ 
+      role: targetStep.approver_role, 
+      required: targetStep.is_required ?? true 
+    });
 
     return approvalChain;
   }, [workflowSettings, workflows]);
+
+  /**
+   * Determine the initial PO status and first approver based on workflow
+   */
+  const getInitialApprovalInfo = useCallback((amount: number): { 
+    status: POStatus; 
+    approverRole: UserRole | null; 
+    emailType: string;
+    approvalChain: { role: UserRole; required: boolean }[];
+  } => {
+    const steps = getApplicableSteps(amount, 'PO');
+    
+    // If no steps (shouldn't happen), default to MD
+    if (steps.length === 0) {
+      return { 
+        status: 'PENDING_MD_APPROVAL', 
+        approverRole: 'MD', 
+        emailType: 'po_approval_request',
+        approvalChain: [{ role: 'MD', required: true }]
+      };
+    }
+
+    const firstStep = steps[0];
+    
+    // Determine status based on first approver role
+    let status: POStatus;
+    let emailType: string;
+    
+    switch (firstStep.role) {
+      case 'PROPERTY_MANAGER':
+        status = 'PENDING_PM_APPROVAL';
+        emailType = 'po_pm_approval_request';
+        break;
+      case 'MD':
+        status = 'PENDING_MD_APPROVAL';
+        emailType = 'po_approval_request';
+        break;
+      case 'CEO':
+        status = 'PENDING_CEO_APPROVAL';
+        emailType = 'po_ceo_approval_request';
+        break;
+      default:
+        status = 'PENDING_MD_APPROVAL';
+        emailType = 'po_approval_request';
+    }
+
+    return { 
+      status, 
+      approverRole: firstStep.role, 
+      emailType,
+      approvalChain: steps
+    };
+  }, [getApplicableSteps]);
+
+  /**
+   * Determine the next approval step after current approval
+   * Returns null if this is the final approval (PO should be APPROVED)
+   */
+  const getNextApprovalStep = useCallback((
+    currentStatus: POStatus, 
+    amount: number
+  ): { 
+    nextStatus: POStatus | null; 
+    nextRole: UserRole | null; 
+    emailType: string | null 
+  } | null => {
+    const steps = getApplicableSteps(amount, 'PO');
+    
+    if (steps.length === 0) {
+      return null; // No more steps, approve
+    }
+
+    // Find current step index based on status
+    let currentStepIndex = -1;
+    
+    if (currentStatus === 'PENDING_PM_APPROVAL') {
+      currentStepIndex = steps.findIndex(s => s.role === 'PROPERTY_MANAGER');
+    } else if (currentStatus === 'PENDING_MD_APPROVAL') {
+      currentStepIndex = steps.findIndex(s => s.role === 'MD');
+    } else if (currentStatus === 'PENDING_CEO_APPROVAL') {
+      currentStepIndex = steps.findIndex(s => s.role === 'CEO');
+    }
+
+    // Check if there's a next step
+    if (currentStepIndex >= 0 && currentStepIndex < steps.length - 1) {
+      const nextStep = steps[currentStepIndex + 1];
+      
+      let nextStatus: POStatus;
+      let emailType: string;
+      
+      switch (nextStep.role) {
+        case 'PROPERTY_MANAGER':
+          nextStatus = 'PENDING_PM_APPROVAL';
+          emailType = 'po_pm_approval_request';
+          break;
+        case 'MD':
+          nextStatus = 'PENDING_MD_APPROVAL';
+          emailType = 'po_approval_request';
+          break;
+        case 'CEO':
+          nextStatus = 'PENDING_CEO_APPROVAL';
+          emailType = 'po_ceo_approval_request';
+          break;
+        default:
+          nextStatus = 'PENDING_MD_APPROVAL';
+          emailType = 'po_approval_request';
+      }
+
+      return { nextStatus, nextRole: nextStep.role, emailType };
+    }
+
+    // No more steps - final approval
+    return null;
+  }, [getApplicableSteps]);
 
   return {
     workflows,
@@ -356,5 +471,7 @@ export function useApprovalWorkflow() {
     deleteWorkflowStep,
     setDefaultWorkflow,
     getApplicableSteps,
+    getInitialApprovalInfo,
+    getNextApprovalStep,
   };
 }

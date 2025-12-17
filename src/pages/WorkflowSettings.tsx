@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApprovalWorkflow } from '@/hooks/useApprovalWorkflow';
 import { UserRole } from '@/types';
@@ -19,7 +19,6 @@ import {
   Plus, 
   Trash2, 
   Edit2, 
-  Check, 
   X, 
   AlertTriangle,
   ArrowRight,
@@ -28,7 +27,8 @@ import {
   Building2,
   Loader2,
   Settings,
-  Workflow
+  Workflow,
+  ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -47,7 +47,6 @@ export default function WorkflowSettings() {
     loading,
     updateWorkflowSettings,
     createWorkflow,
-    updateWorkflow,
     deleteWorkflow,
     addWorkflowStep,
     updateWorkflowStep,
@@ -58,23 +57,27 @@ export default function WorkflowSettings() {
 
   const [newWorkflowName, setNewWorkflowName] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [editingWorkflow, setEditingWorkflow] = useState<string | null>(null);
   const [addStepDialogOpen, setAddStepDialogOpen] = useState(false);
   const [selectedWorkflowForStep, setSelectedWorkflowForStep] = useState<string | null>(null);
   const [newStep, setNewStep] = useState({
     approver_role: 'MD' as UserRole,
-    skip_if_below_amount: '',
     min_amount: '',
-    max_amount: '',
+    requires_previous_approval: true,
   });
 
   // Edit step state
   const [editStepDialogOpen, setEditStepDialogOpen] = useState(false);
-  const [editingStep, setEditingStep] = useState<{ id: string; step_order: number; approver_role: UserRole; min_amount: number | null; max_amount: number | null } | null>(null);
+  const [editingStep, setEditingStep] = useState<{ 
+    id: string; 
+    step_order: number; 
+    approver_role: UserRole; 
+    min_amount: number | null;
+    requires_previous_approval: boolean;
+  } | null>(null);
   const [editStepValues, setEditStepValues] = useState({
     approver_role: 'MD' as UserRole,
     min_amount: '',
-    max_amount: '',
+    requires_previous_approval: true,
   });
 
   const [autoApproveAmount, setAutoApproveAmount] = useState('');
@@ -87,7 +90,7 @@ export default function WorkflowSettings() {
   }, [workflowSettings.auto_approve_below_amount, workflowSettings.require_ceo_above_amount]);
 
   // Example amounts for preview
-  const previewAmounts = [3000, 10000, 20000];
+  const previewAmounts = [3000, 8000, 18000];
 
   if (user?.role !== 'ADMIN' && user?.role !== 'CEO') {
     return (
@@ -139,34 +142,38 @@ export default function WorkflowSettings() {
     await addWorkflowStep(selectedWorkflowForStep, {
       step_order: currentSteps + 1,
       approver_role: newStep.approver_role,
-      skip_if_below_amount: newStep.skip_if_below_amount ? parseFloat(newStep.skip_if_below_amount) : null,
-      min_amount: newStep.min_amount ? parseFloat(newStep.min_amount) : null,
-      max_amount: newStep.max_amount ? parseFloat(newStep.max_amount) : null,
+      min_amount: newStep.min_amount ? parseFloat(newStep.min_amount) : 0,
+      requires_previous_approval: newStep.requires_previous_approval,
       is_required: true,
     });
 
     setNewStep({
       approver_role: 'MD',
-      skip_if_below_amount: '',
       min_amount: '',
-      max_amount: '',
+      requires_previous_approval: true,
     });
     setAddStepDialogOpen(false);
     setSelectedWorkflowForStep(null);
   };
 
-  const handleEditStep = (step: { id: string; step_order: number; approver_role: UserRole; min_amount?: number | null; max_amount?: number | null }) => {
+  const handleEditStep = (step: { 
+    id: string; 
+    step_order: number; 
+    approver_role: UserRole; 
+    min_amount?: number | null;
+    requires_previous_approval?: boolean;
+  }) => {
     setEditingStep({
       id: step.id,
       step_order: step.step_order,
       approver_role: step.approver_role,
       min_amount: step.min_amount ?? null,
-      max_amount: step.max_amount ?? null,
+      requires_previous_approval: step.requires_previous_approval ?? (step.step_order > 1),
     });
     setEditStepValues({
       approver_role: step.approver_role,
       min_amount: step.min_amount?.toString() || '',
-      max_amount: step.max_amount?.toString() || '',
+      requires_previous_approval: step.requires_previous_approval ?? (step.step_order > 1),
     });
     setEditStepDialogOpen(true);
   };
@@ -176,8 +183,8 @@ export default function WorkflowSettings() {
 
     await updateWorkflowStep(editingStep.id, {
       approver_role: editStepValues.approver_role,
-      min_amount: editStepValues.min_amount ? parseFloat(editStepValues.min_amount) : null,
-      max_amount: editStepValues.max_amount ? parseFloat(editStepValues.max_amount) : null,
+      min_amount: editStepValues.min_amount ? parseFloat(editStepValues.min_amount) : 0,
+      requires_previous_approval: editStepValues.requires_previous_approval,
     });
 
     setEditStepDialogOpen(false);
@@ -220,7 +227,7 @@ export default function WorkflowSettings() {
           <Workflow className="h-8 w-8 text-primary" />
           <div>
             <h2 className="text-3xl font-bold text-foreground">Approval Workflows</h2>
-            <p className="text-muted-foreground">Configure custom approval thresholds and multi-step workflows</p>
+            <p className="text-muted-foreground">Configure threshold-based approval workflows</p>
           </div>
         </div>
 
@@ -238,7 +245,7 @@ export default function WorkflowSettings() {
           <CardContent className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <Label htmlFor="auto-approve">Auto-Approve Below (£)</Label>
+                <Label htmlFor="auto-approve">PM Can Approve Below (£)</Label>
                 <Input
                   id="auto-approve"
                   type="number"
@@ -286,7 +293,7 @@ export default function WorkflowSettings() {
                         <div className="flex items-center gap-1">
                           {steps.map((step, idx) => (
                             <div key={idx} className="flex items-center gap-1">
-                              {idx > 0 && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
+                              {idx > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
                               {getRoleBadge(step.role)}
                             </div>
                           ))}
@@ -307,7 +314,7 @@ export default function WorkflowSettings() {
               <div>
                 <CardTitle>Custom Approval Workflows</CardTitle>
                 <CardDescription>
-                  Enable to create complex multi-step approval workflows with custom conditions
+                  Enable to create threshold-based approval workflows with custom steps
                 </CardDescription>
               </div>
               <Switch
@@ -323,7 +330,12 @@ export default function WorkflowSettings() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>Workflow Definitions</CardTitle>
+                <div>
+                  <CardTitle>Workflow Definitions</CardTitle>
+                  <CardDescription>
+                    Define threshold amounts for each approver role. Higher thresholds trigger sequential approval chains.
+                  </CardDescription>
+                </div>
                 <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm">
@@ -335,7 +347,7 @@ export default function WorkflowSettings() {
                     <DialogHeader>
                       <DialogTitle>Create New Workflow</DialogTitle>
                       <DialogDescription>
-                        Create a new approval workflow for purchase orders or invoices
+                        Create a new threshold-based approval workflow
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
@@ -412,39 +424,41 @@ export default function WorkflowSettings() {
                         </div>
                       </div>
 
-                      {/* Steps */}
+                      {/* Steps - Threshold Based Display */}
                       <div className="space-y-2">
                         {workflow.steps && workflow.steps.length > 0 ? (
-                          <div className="flex flex-wrap items-center gap-2">
+                          <div className="space-y-2">
                             {workflow.steps
                               .sort((a, b) => a.step_order - b.step_order)
-                              .map((step, idx) => (
-                                <div key={step.id} className="flex items-center gap-2">
-                                  {idx > 0 && (
-                                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                  )}
-                                  <div className="flex items-center gap-1 border rounded-md px-2 py-1 bg-muted/30">
-                                    <span className="text-xs text-muted-foreground mr-1">
-                                      Step {step.step_order}:
+                              .map((step) => (
+                                <div key={step.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-md">
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-xs text-muted-foreground font-mono w-16">
+                                      Step {step.step_order}
                                     </span>
                                     {getRoleBadge(step.approver_role)}
-                                    {(step.min_amount !== null || step.max_amount !== null) && (
-                                      <span className="text-xs text-muted-foreground">
-                                        ({step.min_amount !== null ? formatCurrency(step.min_amount) : '£0'} - {step.max_amount !== null ? formatCurrency(step.max_amount) : '∞'})
-                                      </span>
+                                    <span className="text-sm text-muted-foreground">
+                                      ≥ {formatCurrency(step.min_amount || 0)}
+                                    </span>
+                                    {(step as any).requires_previous_approval !== false && step.step_order > 1 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        Sequential
+                                      </Badge>
                                     )}
+                                  </div>
+                                  <div className="flex items-center gap-1">
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      className="h-5 w-5 p-0 text-muted-foreground hover:text-primary"
-                                      onClick={() => handleEditStep(step)}
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => handleEditStep(step as any)}
                                     >
                                       <Edit2 className="h-3 w-3" />
                                     </Button>
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
+                                      className="h-7 w-7 p-0 text-destructive hover:text-destructive"
                                       onClick={() => deleteWorkflowStep(step.id)}
                                     >
                                       <X className="h-3 w-3" />
@@ -457,6 +471,32 @@ export default function WorkflowSettings() {
                           <p className="text-sm text-muted-foreground">No steps configured</p>
                         )}
                       </div>
+
+                      {/* Workflow Preview */}
+                      {workflow.steps && workflow.steps.length > 0 && (
+                        <div className="mt-4 pt-4 border-t">
+                          <h5 className="text-sm font-medium mb-2">Approval Chain Preview</h5>
+                          <div className="space-y-1">
+                            {previewAmounts.map(amount => {
+                              const steps = getApplicableSteps(amount);
+                              return (
+                                <div key={amount} className="flex items-center gap-2 text-xs">
+                                  <span className="font-mono w-20">{formatCurrency(amount)}</span>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                  <div className="flex items-center gap-1">
+                                    {steps.map((step, idx) => (
+                                      <div key={idx} className="flex items-center gap-1">
+                                        {idx > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+                                        {getRoleBadge(step.role)}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -471,7 +511,7 @@ export default function WorkflowSettings() {
             <DialogHeader>
               <DialogTitle>Add Approval Step</DialogTitle>
               <DialogDescription>
-                Configure a new approval step for the workflow
+                Configure a threshold-based approval step
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -497,31 +537,30 @@ export default function WorkflowSettings() {
                 </Select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Minimum Amount (£)</Label>
-                  <Input
-                    type="number"
-                    placeholder="e.g., 0"
-                    value={newStep.min_amount}
-                    onChange={(e) => setNewStep({ ...newStep, min_amount: e.target.value })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Lower bound of the interval
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Maximum Amount (£)</Label>
-                  <Input
-                    type="number"
-                    placeholder="No limit"
-                    value={newStep.max_amount}
-                    onChange={(e) => setNewStep({ ...newStep, max_amount: e.target.value })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Upper bound (empty = unlimited)
-                  </p>
-                </div>
+              <div className="space-y-2">
+                <Label>Threshold Amount (£)</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g., 5000"
+                  value={newStep.min_amount}
+                  onChange={(e) => setNewStep({ ...newStep, min_amount: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  This step applies when PO amount is ≥ this threshold
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="requires-previous"
+                  checked={newStep.requires_previous_approval}
+                  onCheckedChange={(checked) => 
+                    setNewStep({ ...newStep, requires_previous_approval: checked as boolean })
+                  }
+                />
+                <Label htmlFor="requires-previous" className="text-sm font-normal">
+                  Requires previous step approval first (sequential)
+                </Label>
               </div>
             </div>
             <DialogFooter>
@@ -539,7 +578,7 @@ export default function WorkflowSettings() {
             <DialogHeader>
               <DialogTitle>Edit Approval Step</DialogTitle>
               <DialogDescription>
-                Modify the approval step configuration
+                Modify the threshold-based approval step
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -565,31 +604,30 @@ export default function WorkflowSettings() {
                 </Select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Minimum Amount (£)</Label>
-                  <Input
-                    type="number"
-                    placeholder="e.g., 0"
-                    value={editStepValues.min_amount}
-                    onChange={(e) => setEditStepValues({ ...editStepValues, min_amount: e.target.value })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Lower bound of the interval
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Maximum Amount (£)</Label>
-                  <Input
-                    type="number"
-                    placeholder="No limit"
-                    value={editStepValues.max_amount}
-                    onChange={(e) => setEditStepValues({ ...editStepValues, max_amount: e.target.value })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Upper bound (empty = unlimited)
-                  </p>
-                </div>
+              <div className="space-y-2">
+                <Label>Threshold Amount (£)</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g., 5000"
+                  value={editStepValues.min_amount}
+                  onChange={(e) => setEditStepValues({ ...editStepValues, min_amount: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  This step applies when PO amount is ≥ this threshold
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="edit-requires-previous"
+                  checked={editStepValues.requires_previous_approval}
+                  onCheckedChange={(checked) => 
+                    setEditStepValues({ ...editStepValues, requires_previous_approval: checked as boolean })
+                  }
+                />
+                <Label htmlFor="edit-requires-previous" className="text-sm font-normal">
+                  Requires previous step approval first (sequential)
+                </Label>
               </div>
             </div>
             <DialogFooter>
@@ -604,20 +642,25 @@ export default function WorkflowSettings() {
         {/* Help Section */}
         <Alert>
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>How Approval Workflows Work</AlertTitle>
+          <AlertTitle>How Threshold-Based Workflows Work</AlertTitle>
           <AlertDescription className="mt-2">
             <ul className="list-disc list-inside space-y-1 text-sm">
               <li>
-                <strong>Quick Thresholds</strong> work independently - set simple rules for auto-approval and CEO escalation
+                <strong>Each step has a threshold</strong> - the minimum amount that triggers that approval step
               </li>
               <li>
-                <strong>Custom Workflows</strong> give you full control over multi-step approval chains
+                <strong>Sequential approval</strong> - when enabled, higher-level approvers require lower-level approval first (e.g., MD → CEO)
               </li>
               <li>
-                When both are enabled, custom workflows take precedence over quick thresholds
+                <strong>Example:</strong> PM at £0, MD at £5,000, CEO at £15,000 means:
+                <ul className="list-disc list-inside ml-4 mt-1 text-muted-foreground">
+                  <li>£4,000 PO → PM only</li>
+                  <li>£10,000 PO → MD only</li>
+                  <li>£20,000 PO → MD first, then CEO</li>
+                </ul>
               </li>
               <li>
-                The default workflow is used for all new POs; you can have different workflows for different scenarios
+                Changes take effect immediately for new POs
               </li>
             </ul>
           </AlertDescription>

@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { PurchaseOrder, POApprovalLog, POStatus } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useApprovalWorkflow } from '@/hooks/useApprovalWorkflow';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters';
 import { toast } from 'sonner';
 import { CheckCircle, XCircle, Edit, Trash2, Send, FileText, AlertTriangle, Download, Mail, Eye } from 'lucide-react';
@@ -24,6 +25,7 @@ export default function PODetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { getNextApprovalStep } = useApprovalWorkflow();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [approvalLogs, setApprovalLogs] = useState<POApprovalLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,83 +85,16 @@ export default function PODetail() {
 
     setProcessing(true);
     try {
-      // Get workflow settings to check thresholds
-      const { data: settings } = await supabase
-        .from('settings')
-        .select('use_custom_workflows, require_ceo_above_amount')
-        .eq('organisation_id', user.organisation_id)
-        .maybeSingle();
-
-      const ceoThreshold = settings?.require_ceo_above_amount || 15000;
-      const useCustomWorkflows = settings?.use_custom_workflows ?? false;
       const poAmount = Number(po.amount_inc_vat);
 
-      // Determine if there's a next step after current approval using HIERARCHICAL logic
-      let nextStatus: POStatus | null = null;
-      let nextEmailType: string | null = null;
-      let nextApproverRole: string | null = null;
+      // Use the dynamic workflow hook to determine next step
+      const nextStep = getNextApprovalStep(po.status, poAmount);
 
-      if (useCustomWorkflows) {
-        // Get workflow steps
-        const { data: workflows } = await supabase
-          .from('approval_workflows')
-          .select(`*, steps:approval_workflow_steps(*)`)
-          .eq('organisation_id', user.organisation_id)
-          .eq('workflow_type', 'PO')
-          .eq('is_default', true)
-          .eq('is_active', true)
-          .single();
-
-        if (workflows?.steps) {
-          const sortedSteps = (workflows.steps as any[]).sort((a, b) => a.step_order - b.step_order);
-          
-          // Find which step this amount targets (highest step where amount >= min_amount)
-          let targetStep = sortedSteps.find(step => {
-            const meetsMin = !step.min_amount || poAmount >= step.min_amount;
-            const withinMax = !step.max_amount || poAmount <= step.max_amount;
-            return meetsMin && withinMax;
-          });
-
-          // If no exact match, find highest applicable step
-          if (!targetStep) {
-            for (let i = sortedSteps.length - 1; i >= 0; i--) {
-              if (!sortedSteps[i].min_amount || poAmount >= sortedSteps[i].min_amount) {
-                targetStep = sortedSteps[i];
-                break;
-              }
-            }
-          }
-
-          // Build hierarchical chain and determine next step
-          if (targetStep) {
-            // If target is CEO and current status is MD approval, route to CEO next
-            if (targetStep.approver_role === 'CEO' && po.status === 'PENDING_MD_APPROVAL') {
-              nextStatus = 'PENDING_CEO_APPROVAL';
-              nextEmailType = 'po_ceo_approval_request';
-              nextApproverRole = 'CEO';
-            }
-            // If target is MD and current status is PM approval, route to MD next
-            else if ((targetStep.approver_role === 'MD' || targetStep.approver_role === 'CEO') && po.status === 'PENDING_PM_APPROVAL') {
-              nextStatus = 'PENDING_MD_APPROVAL';
-              nextEmailType = 'po_approval_request';
-              nextApproverRole = 'MD';
-            }
-          }
-        }
-      } else {
-        // Default workflow: Check if CEO approval is required (MD approving high-value PO)
-        if (po.status === 'PENDING_MD_APPROVAL' && poAmount >= ceoThreshold && user.role !== 'CEO') {
-          nextStatus = 'PENDING_CEO_APPROVAL';
-          nextEmailType = 'po_ceo_approval_request';
-          nextApproverRole = 'CEO';
-        }
-      }
-
-      if (nextStatus) {
+      if (nextStep && nextStep.nextStatus) {
         // Route to next approver
         const { error: updateError } = await supabase
           .from('purchase_orders')
-          .update({ status: nextStatus as any }) // Cast needed until DB types are regenerated
+          .update({ status: nextStep.nextStatus as any })
           .eq('id', po.id);
 
         if (updateError) throw updateError;
@@ -170,14 +105,16 @@ export default function PODetail() {
           po_id: po.id,
           action_by_user_id: user.id,
           action: 'APPROVED',
-          comment: `${roleLabel} approved - routed to ${nextApproverRole} for approval`,
+          comment: `${roleLabel} approved - routed to ${nextStep.nextRole} for approval`,
         }]);
 
         // Notify next approver users
         const rolesToNotify: ('PROPERTY_MANAGER' | 'MD' | 'CEO' | 'ACCOUNTS' | 'ADMIN')[] = 
-          nextApproverRole === 'CEO' ? ['CEO'] : 
-          nextApproverRole === 'MD' ? ['MD', 'ADMIN'] : 
-          ['PROPERTY_MANAGER', 'ADMIN'];
+          nextStep.nextRole === 'CEO' ? ['CEO'] : 
+          nextStep.nextRole === 'MD' ? ['MD', 'ADMIN'] : 
+          nextStep.nextRole === 'PROPERTY_MANAGER' ? ['PROPERTY_MANAGER', 'ADMIN'] :
+          ['ADMIN'];
+        
         const { data: nextApprovers } = await supabase
           .from('users')
           .select('id')
@@ -190,8 +127,8 @@ export default function PODetail() {
             nextApprovers.map((approver) => ({
               user_id: approver.id,
               organisation_id: user.organisation_id,
-              type: nextStatus === 'PENDING_CEO_APPROVAL' ? 'po_pending_ceo_approval' : 'po_pending_approval',
-              title: nextStatus === 'PENDING_CEO_APPROVAL' ? 'High-Value PO Requires CEO Approval' : 'PO Requires Approval',
+              type: nextStep.nextStatus === 'PENDING_CEO_APPROVAL' ? 'po_pending_ceo_approval' : 'po_pending_approval',
+              title: nextStep.nextStatus === 'PENDING_CEO_APPROVAL' ? 'High-Value PO Requires CEO Approval' : 'PO Requires Approval',
               message: `PO ${po.po_number} (${formatCurrency(poAmount)}) requires your approval`,
               link: `/pos/${po.id}`,
               related_po_id: po.id,
@@ -200,13 +137,13 @@ export default function PODetail() {
         }
 
         // Send email notification to next approver
-        if (nextEmailType) {
+        if (nextStep.emailType) {
           supabase.functions.invoke('send-email', {
-            body: { type: nextEmailType, po_id: po.id }
+            body: { type: nextStep.emailType, po_id: po.id }
           }).catch(err => console.error('Email notification failed:', err));
         }
 
-        toast.success(`PO approved - routed to ${nextApproverRole} for final approval`);
+        toast.success(`PO approved - routed to ${nextStep.nextRole} for final approval`);
         fetchPO();
         fetchApprovalLogs();
         return;
