@@ -52,12 +52,18 @@ export default function UserManagement() {
 
   const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('users')
-        .update({ role: newRole as any }) // Cast needed until DB types regenerated with CEO role
-        .eq('id', userId);
+        .update({ role: newRole as any })
+        .eq('id', userId)
+        .select();
 
       if (error) throw error;
+      
+      if (!data || data.length === 0) {
+        toast.error('Failed to update user role - permission denied');
+        return;
+      }
       
       toast.success('User role updated successfully');
       fetchUsers();
