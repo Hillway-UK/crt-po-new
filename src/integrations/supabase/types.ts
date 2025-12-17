@@ -10,10 +10,95 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "13.0.5"
+    PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
+      approval_workflow_steps: {
+        Row: {
+          approver_role: Database["public"]["Enums"]["user_role"]
+          created_at: string | null
+          id: string
+          is_required: boolean | null
+          max_amount: number | null
+          min_amount: number | null
+          skip_if_below_amount: number | null
+          step_order: number
+          workflow_id: string | null
+        }
+        Insert: {
+          approver_role: Database["public"]["Enums"]["user_role"]
+          created_at?: string | null
+          id?: string
+          is_required?: boolean | null
+          max_amount?: number | null
+          min_amount?: number | null
+          skip_if_below_amount?: number | null
+          step_order: number
+          workflow_id?: string | null
+        }
+        Update: {
+          approver_role?: Database["public"]["Enums"]["user_role"]
+          created_at?: string | null
+          id?: string
+          is_required?: boolean | null
+          max_amount?: number | null
+          min_amount?: number | null
+          skip_if_below_amount?: number | null
+          step_order?: number
+          workflow_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "approval_workflow_steps_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "approval_workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      approval_workflows: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          is_default: boolean | null
+          name: string
+          organisation_id: string | null
+          updated_at: string | null
+          workflow_type: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_default?: boolean | null
+          name: string
+          organisation_id?: string | null
+          updated_at?: string | null
+          workflow_type: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_default?: boolean | null
+          name?: string
+          organisation_id?: string | null
+          updated_at?: string | null
+          workflow_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "approval_workflows_organisation_id_fkey"
+            columns: ["organisation_id"]
+            isOneToOne: false
+            referencedRelation: "organisations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contractors: {
         Row: {
           address: string | null
@@ -683,10 +768,10 @@ export type Database = {
       po_status:
         | "DRAFT"
         | "PENDING_MD_APPROVAL"
+        | "PENDING_CEO_APPROVAL"
         | "APPROVED"
         | "REJECTED"
         | "CANCELLED"
-        | "PENDING_CEO_APPROVAL"
       user_role: "PROPERTY_MANAGER" | "MD" | "ACCOUNTS" | "ADMIN" | "CEO"
     }
     CompositeTypes: {
@@ -835,10 +920,10 @@ export const Constants = {
       po_status: [
         "DRAFT",
         "PENDING_MD_APPROVAL",
+        "PENDING_CEO_APPROVAL",
         "APPROVED",
         "REJECTED",
         "CANCELLED",
-        "PENDING_CEO_APPROVAL",
       ],
       user_role: ["PROPERTY_MANAGER", "MD", "ACCOUNTS", "ADMIN", "CEO"],
     },
