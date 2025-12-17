@@ -27,6 +27,7 @@ export interface ApprovalWorkflowStep {
   max_amount?: number;
   is_required: boolean;
   skip_if_below_amount?: number;
+  requires_previous_approval?: boolean;
   created_at: string;
 }
 

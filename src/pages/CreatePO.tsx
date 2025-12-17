@@ -31,7 +31,7 @@ const purchaseOrderSchema = z.object({
 export default function CreatePO() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { getApplicableSteps, workflowSettings, loading: workflowLoading } = useApprovalWorkflow();
+  const { getInitialApprovalInfo, loading: workflowLoading } = useApprovalWorkflow();
   const [loading, setLoading] = useState(false);
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -98,31 +98,6 @@ export default function CreatePO() {
     return amount + calculateVAT();
   };
 
-  // Determine the initial status and first approver role based on workflow
-  const getInitialApprovalInfo = (amount: number): { status: POStatus; approverRole: UserRole | null; emailType: string } => {
-    const steps = getApplicableSteps(amount, 'PO');
-    
-    // If no steps required (auto-approve scenario), directly approve
-    if (steps.length === 0) {
-      return { status: 'APPROVED', approverRole: null, emailType: '' };
-    }
-
-    const firstStep = steps[0];
-    
-    // Determine status based on first approver role
-    if (firstStep.role === 'PROPERTY_MANAGER') {
-      return { status: 'PENDING_PM_APPROVAL', approverRole: 'PROPERTY_MANAGER', emailType: 'po_pm_approval_request' };
-    } else if (firstStep.role === 'MD') {
-      return { status: 'PENDING_MD_APPROVAL', approverRole: 'MD', emailType: 'po_approval_request' };
-    } else if (firstStep.role === 'CEO') {
-      // If CEO is first step, still go through MD first unless custom workflow says otherwise
-      return { status: 'PENDING_MD_APPROVAL', approverRole: 'MD', emailType: 'po_approval_request' };
-    }
-    
-    // Default to MD approval
-    return { status: 'PENDING_MD_APPROVAL', approverRole: 'MD', emailType: 'po_approval_request' };
-  };
-
   const handleSubmit = async (submitForApproval: boolean) => {
     setErrors({});
     setLoading(true);
@@ -145,17 +120,19 @@ export default function CreatePO() {
 
       if (poNumError) throw poNumError;
 
-      // Get the initial status and approver based on workflow
-      const { status: initialStatus, approverRole, emailType } = submitForApproval 
+      // Get the initial status and approver based on dynamic workflow
+      const approvalInfo = submitForApproval 
         ? getInitialApprovalInfo(amountIncVat)
-        : { status: 'DRAFT' as POStatus, approverRole: null, emailType: '' };
+        : { status: 'DRAFT' as POStatus, approverRole: null, emailType: '', approvalChain: [] };
+      
+      const { status: initialStatus, approverRole, emailType } = approvalInfo;
 
       const poData: any = {
         contractor_id: validated.contractor_id,
         description: validated.description,
         amount_ex_vat: validated.amount_ex_vat,
         vat_rate: validated.vat_rate,
-        amount_inc_vat: amountIncVat, // Include the calculated total
+        amount_inc_vat: amountIncVat,
         property_id: validated.property_id,
         notes: validated.notes,
         po_number: poNumber,
