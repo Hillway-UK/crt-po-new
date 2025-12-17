@@ -10,7 +10,7 @@ const corsHeaders = {
 };
 
 interface EmailRequest {
-  type: 'po_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'user_invitation';
+  type: 'po_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'user_invitation';
   po_id?: string;
   invoice_id?: string;
   invitation_id?: string;
@@ -125,9 +125,10 @@ serve(async (req) => {
       }
     }
 
-    // Fetch MD and ADMIN users for the organization
+    // Fetch MD, ADMIN, and CEO users for the organization
     let mdAdminUsers: { email: string; full_name: string }[] = [];
     let accountsAdminUsers: { email: string; full_name: string }[] = [];
+    let ceoUsers: { email: string; full_name: string }[] = [];
     const orgId = po?.organisation_id || invoice?.organisation_id || invitation?.organisation_id;
     if (orgId) {
       const { data: mdUsers } = await supabase
@@ -150,6 +151,18 @@ serve(async (req) => {
       
       if (accountsUsers && accountsUsers.length > 0) {
         accountsAdminUsers = accountsUsers;
+      }
+
+      // Fetch CEO users for the organization
+      const { data: ceoUsersData } = await supabase
+        .from('users')
+        .select('email, full_name')
+        .eq('organisation_id', orgId)
+        .eq('role', 'CEO')
+        .eq('is_active', true);
+      
+      if (ceoUsersData && ceoUsersData.length > 0) {
+        ceoUsers = ceoUsersData;
       }
     }
 
@@ -566,6 +579,89 @@ serve(async (req) => {
                   Best regards,<br>
                   <strong>CRT Property Investments Ltd</strong>
                 </p>
+              </div>
+              
+              <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                <p>CRT Property Investments Ltd<br>
+                1 Waterside Park, Valley Way, Wombwell, Barnsley, S73 0BB</p>
+              </div>
+            </div>
+          `,
+        });
+        break;
+
+      case 'po_ceo_approval_request':
+        // Get CEO recipients or fallback to MD email
+        const ceoRecipients = ceoUsers.length > 0 
+          ? ceoUsers.map(u => u.email) 
+          : [mdEmail];
+        
+        console.log(`Sending PO CEO approval request to ${ceoRecipients.length} recipient(s):`, ceoRecipients);
+        
+        emailResult = await resend.emails.send({
+          from: formatFromEmail(mdEmail, 'CRT Property Approvals'),
+          to: ceoRecipients,
+          subject: `High-Value PO Requires CEO Approval: ${po.po_number} - ${formatCurrency(Number(po.amount_inc_vat))}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white; padding: 30px; text-align: center;">
+                <h1 style="margin: 0;">High-Value Purchase Order</h1>
+                <p style="margin: 10px 0 0 0; opacity: 0.9;">Requires CEO Approval</p>
+              </div>
+              
+              <div style="padding: 30px; background: #f9fafb;">
+                <div style="background: #fff8e1; border: 1px solid #f59e0b; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
+                  <p style="margin: 0; color: #f59e0b; font-weight: bold;">⚠️ High-Value Approval Required</p>
+                  <p style="margin: 10px 0 0 0; color: #666; font-size: 14px;">
+                    This PO exceeds the MD approval threshold and requires your approval.
+                  </p>
+                </div>
+                
+                <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
+                  This purchase order has been approved by MD and requires your final approval:
+                </p>
+                
+                <div style="background: white; border-left: 4px solid #f97316; padding: 20px; margin-bottom: 20px;">
+                  <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>PO Number:</strong></td>
+                      <td style="padding: 8px 0; text-align: right; font-family: monospace; font-weight: bold;">${po.po_number}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Contractor:</strong></td>
+                      <td style="padding: 8px 0; text-align: right;">${po.contractor.name}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Amount:</strong></td>
+                      <td style="padding: 8px 0; text-align: right; font-size: 18px; color: #f97316; font-weight: bold;">${formatCurrency(Number(po.amount_inc_vat))}</td>
+                    </tr>
+                    ${po.property ? `
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Property:</strong></td>
+                      <td style="padding: 8px 0; text-align: right;">${po.property.name}</td>
+                    </tr>
+                    ` : ''}
+                  </table>
+                </div>
+                
+                <div style="background: #f3f4f6; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                  <p style="margin: 0; color: #666;"><strong>Description:</strong></p>
+                  <p style="margin: 10px 0 0 0; color: #333;">${po.description.substring(0, 200)}${po.description.length > 200 ? '...' : ''}</p>
+                </div>
+                
+                <div style="background: #fff; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                  <p style="margin: 0; color: #666; font-size: 14px;">
+                    <strong>Requested by:</strong> ${po.created_by.full_name}<br>
+                    <strong>Date:</strong> ${formatDate(po.created_at)}
+                  </p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                  <a href="${appUrl}/approvals" 
+                     style="display: inline-block; background: #f97316; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; font-weight: bold;">
+                    View in Approvals Hub
+                  </a>
+                </div>
               </div>
               
               <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
