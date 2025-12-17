@@ -345,6 +345,7 @@ function AccountsDashboard({ user }: { user: any }) {
 }
 
 function AdminDashboard({ user }: { user: any }) {
+  const navigate = useNavigate();
   const { data: stats } = useQuery({
     queryKey: ['admin-dashboard-stats', user.organisation_id],
     queryFn: async () => {
@@ -356,16 +357,78 @@ function AdminDashboard({ user }: { user: any }) {
     },
   });
 
+  const { data: mdStats } = useQuery({
+    queryKey: ['md-dashboard-stats', user.organisation_id],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_md_dashboard_stats', {
+        org_id: user.organisation_id,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+  });
+
+  const hasPending = (mdStats?.pending_pos || 0) + (mdStats?.pending_invoices || 0) > 0;
+
   return (
     <MainLayout title="Dashboard">
       <div className="space-y-6">
-        <div>
-          <h2 className="text-3xl font-bold text-foreground">System Overview</h2>
-          <p className="text-muted-foreground mt-2">Administration Dashboard</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-3xl font-bold text-foreground">Welcome back, {user?.full_name}</h2>
+            <p className="text-muted-foreground mt-1">{new Date().toLocaleDateString('en-GB', { dateStyle: 'full' })}</p>
+          </div>
+          {hasPending && (
+            <div className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-medium">
+              Requires Attention
+            </div>
+          )}
         </div>
 
+        {/* Quick Actions */}
+        <div className="flex flex-wrap gap-3">
+          <Button asChild>
+            <Link to="/pos/new">
+              <FileText className="mr-2 h-4 w-4" />
+              Create New PO
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/invoices">View Invoices</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/approvals">Review Approvals</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/users">User Management</Link>
+          </Button>
+        </div>
+
+        {/* Pending Approvals Section */}
+        {hasPending && (
+          <Card className="border-l-4 border-l-amber-400">
+            <CardHeader>
+              <CardTitle>Pending Approvals</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm">Purchase Orders</span>
+                <span className="text-2xl font-bold">{mdStats?.pending_pos || 0}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm">Invoices</span>
+                <span className="text-2xl font-bold">{mdStats?.pending_invoices || 0}</span>
+              </div>
+              <Button asChild className="w-full">
+                <Link to="/approvals">Review Now</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* System Overview Stats */}
         <div className="grid gap-4 md:grid-cols-4">
-          <Card>
+          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate('/users')}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Users</CardTitle>
               <Users className="h-4 w-4 text-muted-foreground" />
@@ -376,7 +439,7 @@ function AdminDashboard({ user }: { user: any }) {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate('/pos')}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Purchase Orders</CardTitle>
               <FileText className="h-4 w-4 text-muted-foreground" />
@@ -387,7 +450,7 @@ function AdminDashboard({ user }: { user: any }) {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate('/invoices')}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Invoices</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
