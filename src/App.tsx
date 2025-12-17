@@ -4,6 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { isSupabaseConfigured } from "@/integrations/supabase/client";
+import { SupabaseSetup } from "@/components/SupabaseSetup";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import PurchaseOrders from "./pages/PurchaseOrders";
@@ -17,30 +19,43 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <AuthProvider>
+const App = () => {
+  // Show setup screen if Supabase is not configured
+  if (!isSupabaseConfigured) {
+    return (
+      <TooltipProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/pos" element={<PurchaseOrders />} />
-            <Route path="/approvals" element={<Approvals />} />
-            <Route path="/invoices" element={<Invoices />} />
-            <Route path="/contractors" element={<Contractors />} />
-            <Route path="/properties" element={<Properties />} />
-            <Route path="/users" element={<UserManagement />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+        <SupabaseSetup />
+      </TooltipProvider>
+    );
+  }
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <AuthProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/pos" element={<PurchaseOrders />} />
+              <Route path="/approvals" element={<Approvals />} />
+              <Route path="/invoices" element={<Invoices />} />
+              <Route path="/contractors" element={<Contractors />} />
+              <Route path="/properties" element={<Properties />} />
+              <Route path="/users" element={<UserManagement />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+};
 
 export default App;
