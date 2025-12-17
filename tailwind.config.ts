@@ -22,6 +22,7 @@ export default {
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
+          hover: "hsl(var(--primary-hover))",
         },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
@@ -56,6 +57,16 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
+        },
+        crt: {
+          purple: "hsl(var(--crt-purple))",
+          "purple-dark": "hsl(var(--crt-purple-dark))",
+          "purple-light": "hsl(var(--crt-purple-light))",
+          amber: "hsl(var(--crt-amber))",
+          "amber-dark": "hsl(var(--crt-amber-dark))",
+          "gray-50": "hsl(var(--crt-gray-50))",
+          "gray-100": "hsl(var(--crt-gray-100))",
+          "gray-200": "hsl(var(--crt-gray-200))",
         },
       },
       borderRadius: {
