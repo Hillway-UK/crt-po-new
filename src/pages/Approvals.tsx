@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
-import { PurchaseOrder, Invoice } from '@/types';
+import { PurchaseOrder, Invoice, UserRole, ApprovalWorkflow } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/formatters';
@@ -17,10 +17,16 @@ import { RejectDialog } from '@/components/po/RejectDialog';
 import { ApproveInvoiceDialog } from '@/components/invoices/ApproveInvoiceDialog';
 import { RejectInvoiceDialog } from '@/components/invoices/RejectInvoiceDialog';
 
+interface WorkflowSettings {
+  use_custom_workflows: boolean;
+  auto_approve_below_amount: number | null;
+  require_ceo_above_amount: number | null;
+}
+
 export default function Approvals() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [pendingPOs, setPendingPOs] = useState<PurchaseOrder[]>([]);
+  const [allPendingPOs, setAllPendingPOs] = useState<PurchaseOrder[]>([]);
   const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
@@ -31,11 +37,51 @@ export default function Approvals() {
   const [rejectInvoiceDialogOpen, setRejectInvoiceDialogOpen] = useState(false);
   const [processingPOs, setProcessingPOs] = useState<Set<string>>(new Set());
   const [processingInvoices, setProcessingInvoices] = useState<Set<string>>(new Set());
+  const [workflowSettings, setWorkflowSettings] = useState<WorkflowSettings>({
+    use_custom_workflows: false,
+    auto_approve_below_amount: null,
+    require_ceo_above_amount: null,
+  });
+  const [workflows, setWorkflows] = useState<ApprovalWorkflow[]>([]);
 
   useEffect(() => {
     fetchPendingPOs();
     fetchPendingInvoices();
-  }, []);
+    fetchWorkflowData();
+  }, [user?.organisation_id]);
+
+  const fetchWorkflowData = async () => {
+    if (!user?.organisation_id) return;
+
+    try {
+      // Fetch settings
+      const { data: settings } = await supabase
+        .from('settings')
+        .select('use_custom_workflows, auto_approve_below_amount, require_ceo_above_amount')
+        .eq('organisation_id', user.organisation_id)
+        .single();
+
+      if (settings) {
+        setWorkflowSettings({
+          use_custom_workflows: (settings as any).use_custom_workflows || false,
+          auto_approve_below_amount: (settings as any).auto_approve_below_amount ? Number((settings as any).auto_approve_below_amount) : null,
+          require_ceo_above_amount: (settings as any).require_ceo_above_amount ? Number((settings as any).require_ceo_above_amount) : null,
+        });
+      }
+
+      // Fetch workflows with steps
+      const { data: workflowData } = await (supabase as any)
+        .from('approval_workflows')
+        .select(`*, steps:approval_workflow_steps(*)`)
+        .eq('organisation_id', user.organisation_id);
+
+      if (workflowData) {
+        setWorkflows(workflowData);
+      }
+    } catch (error) {
+      console.error('Error fetching workflow data:', error);
+    }
+  };
 
   const fetchPendingPOs = async () => {
     setLoading(true);
@@ -48,11 +94,11 @@ export default function Approvals() {
           property:properties(*),
           created_by:users!created_by_user_id(*)
         `)
-        .in('status', ['PENDING_MD_APPROVAL', 'PENDING_CEO_APPROVAL'])
+        .in('status', ['PENDING_PM_APPROVAL', 'PENDING_MD_APPROVAL', 'PENDING_CEO_APPROVAL'])
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setPendingPOs(data as any || []);
+      setAllPendingPOs(data as any || []);
     } catch (error) {
       toast.error('Failed to load pending approvals');
       console.error(error);
@@ -60,6 +106,64 @@ export default function Approvals() {
       setLoading(false);
     }
   };
+
+  // Filter POs based on user role and workflow configuration
+  const pendingPOs = useMemo(() => {
+    if (!user?.role) return [];
+
+    return allPendingPOs.filter(po => {
+      const poStatus = po.status;
+
+      // PROPERTY_MANAGER: Only see PENDING_PM_APPROVAL POs
+      if (user.role === 'PROPERTY_MANAGER') {
+        return poStatus === 'PENDING_PM_APPROVAL';
+      }
+
+      // ACCOUNTS: No approval authority for POs, but can view for awareness
+      if (user.role === 'ACCOUNTS') {
+        return false; // Accounts doesn't approve POs
+      }
+
+      // MD: See PENDING_MD_APPROVAL and can also see PENDING_CEO_APPROVAL (for awareness, but can't approve)
+      if (user.role === 'MD') {
+        return poStatus === 'PENDING_MD_APPROVAL';
+      }
+
+      // CEO/ADMIN: Check workflow configuration
+      if (user.role === 'CEO' || user.role === 'ADMIN') {
+        // Always show PENDING_CEO_APPROVAL POs
+        if (poStatus === 'PENDING_CEO_APPROVAL') {
+          return true;
+        }
+
+        // For PENDING_MD_APPROVAL, check if CEO step is sequential
+        if (poStatus === 'PENDING_MD_APPROVAL') {
+          if (workflowSettings.use_custom_workflows) {
+            // Custom workflows: Check if CEO step requires previous approval
+            const defaultWorkflow = workflows.find(
+              w => w.is_default && w.workflow_type === 'PO' && w.is_active
+            );
+            
+            if (defaultWorkflow?.steps) {
+              const ceoStep = defaultWorkflow.steps.find(s => s.approver_role === 'CEO');
+              // If CEO step requires_previous_approval is false, CEO can see MD-level POs
+              return ceoStep?.requires_previous_approval === false;
+            }
+          }
+          // Quick thresholds or no workflow: CEO approval is always sequential after MD
+          // So CEO should NOT see PENDING_MD_APPROVAL POs
+          return false;
+        }
+
+        // PENDING_PM_APPROVAL - CEO/Admin can see and approve these (higher authority)
+        if (poStatus === 'PENDING_PM_APPROVAL') {
+          return true;
+        }
+      }
+
+      return false;
+    });
+  }, [allPendingPOs, user?.role, workflowSettings, workflows]);
 
   const fetchPendingInvoices = async () => {
     try {
@@ -150,7 +254,7 @@ export default function Approvals() {
         }).catch(err => console.error('CEO email notification failed:', err));
 
         toast.success('PO approved by MD - routed to CEO for final approval');
-        setPendingPOs(prev => prev.filter(p => p.id !== poId));
+        setAllPendingPOs(prev => prev.filter(p => p.id !== poId));
         return;
       }
 
@@ -239,7 +343,7 @@ export default function Approvals() {
       toast.success('Purchase order approved and sent to contractor');
       
       // Remove from list with optimistic update
-      setPendingPOs(prev => prev.filter(p => p.id !== poId));
+      setAllPendingPOs(prev => prev.filter(p => p.id !== poId));
     } catch (error) {
       console.error('Failed to approve PO:', error);
       toast.error('Failed to approve purchase order');
@@ -286,7 +390,7 @@ export default function Approvals() {
       toast.success('Purchase order rejected. PM has been notified.');
       
       // Remove from list
-      setPendingPOs(prev => prev.filter(p => p.id !== poId));
+      setAllPendingPOs(prev => prev.filter(p => p.id !== poId));
     } catch (error) {
       console.error('Failed to reject PO:', error);
       toast.error('Failed to reject purchase order');
