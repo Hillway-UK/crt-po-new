@@ -14,6 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      approval_delegations: {
+        Row: {
+          created_at: string | null
+          delegate_user_id: string
+          delegator_user_id: string
+          ends_at: string | null
+          id: string
+          is_active: boolean | null
+          scope: string
+          starts_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          delegate_user_id: string
+          delegator_user_id: string
+          ends_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          scope?: string
+          starts_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          delegate_user_id?: string
+          delegator_user_id?: string
+          ends_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          scope?: string
+          starts_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "approval_delegations_delegate_user_id_fkey"
+            columns: ["delegate_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "approval_delegations_delegator_user_id_fkey"
+            columns: ["delegator_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       approval_workflow_steps: {
         Row: {
           approver_role: Database["public"]["Enums"]["user_role"]
@@ -399,6 +450,7 @@ export type Database = {
         Row: {
           action: Database["public"]["Enums"]["approval_action"]
           action_by_user_id: string | null
+          approved_on_behalf_of_user_id: string | null
           comment: string | null
           created_at: string | null
           id: string
@@ -407,6 +459,7 @@ export type Database = {
         Insert: {
           action: Database["public"]["Enums"]["approval_action"]
           action_by_user_id?: string | null
+          approved_on_behalf_of_user_id?: string | null
           comment?: string | null
           created_at?: string | null
           id?: string
@@ -415,6 +468,7 @@ export type Database = {
         Update: {
           action?: Database["public"]["Enums"]["approval_action"]
           action_by_user_id?: string | null
+          approved_on_behalf_of_user_id?: string | null
           comment?: string | null
           created_at?: string | null
           id?: string
@@ -424,6 +478,13 @@ export type Database = {
           {
             foreignKeyName: "po_approval_logs_action_by_user_id_fkey"
             columns: ["action_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "po_approval_logs_approved_on_behalf_of_user_id_fkey"
+            columns: ["approved_on_behalf_of_user_id"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]

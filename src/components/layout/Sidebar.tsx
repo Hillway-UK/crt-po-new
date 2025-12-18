@@ -19,7 +19,7 @@ export function Sidebar() {
     { icon: Users, label: 'Contractors', to: '/contractors', roles: ['PROPERTY_MANAGER', 'MD', 'ACCOUNTS', 'ADMIN'] },
     { icon: Building, label: 'Properties', to: '/properties', roles: ['PROPERTY_MANAGER', 'MD', 'ACCOUNTS', 'ADMIN'] },
     { icon: UserCog, label: 'User Management', to: '/users', roles: ['PROPERTY_MANAGER', 'MD', 'ADMIN'] },
-    { icon: Settings, label: 'Settings', to: '/settings', roles: ['ADMIN', 'CEO'] },
+    { icon: Settings, label: 'Settings', to: '/settings', roles: ['ADMIN', 'CEO', 'MD'] },
   ];
 
   const filteredNavItems = navItems.filter(item => item.roles.includes(user.role));
