@@ -25,7 +25,7 @@ export default function PODetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { getNextApprovalStep } = useApprovalWorkflow();
+  const { getNextApprovalStep, getAutoCompletableSteps } = useApprovalWorkflow();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [approvalLogs, setApprovalLogs] = useState<POApprovalLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,11 +87,111 @@ export default function PODetail() {
     try {
       const poAmount = Number(po.amount_inc_vat);
 
+      // Check if there are steps this approver can auto-complete
+      const autoCompletableSteps = getAutoCompletableSteps(po.status, poAmount, user.role);
+      
       // Use the dynamic workflow hook to determine next step
       const nextStep = getNextApprovalStep(po.status, poAmount);
 
+      // If there's a next step BUT the current approver can auto-complete it, skip to final approval
+      if (nextStep && nextStep.nextStatus && autoCompletableSteps.length > 0) {
+        // Higher-role user is approving - check if they can complete ALL remaining steps
+        const remainingStepRoles = autoCompletableSteps.map(s => s.role);
+        const canCompleteAll = remainingStepRoles.includes(nextStep.nextRole!);
+
+        if (canCompleteAll) {
+          // Auto-complete: Log the current step approval
+          const roleLabel = user.role === 'PROPERTY_MANAGER' ? 'PM' : user.role;
+          await supabase.from('po_approval_logs').insert([{
+            po_id: po.id,
+            action_by_user_id: user.id,
+            action: 'APPROVED',
+            comment: `${roleLabel} approved (acting at ${po.status.replace('PENDING_', '').replace('_APPROVAL', '')} step)`,
+          }]);
+
+          // Log auto-completed steps
+          for (const step of autoCompletableSteps) {
+            await supabase.from('po_approval_logs').insert([{
+              po_id: po.id,
+              action_by_user_id: user.id,
+              action: 'APPROVED',
+              comment: `Auto-approved ${step.role} step (same approver has authority)`,
+            }]);
+          }
+
+          // Go directly to full approval
+          const { error: updateError } = await supabase
+            .from('purchase_orders')
+            .update({
+              status: 'APPROVED',
+              approved_by_user_id: user.id,
+              approval_date: new Date().toISOString(),
+            })
+            .eq('id', po.id);
+
+          if (updateError) throw updateError;
+
+          // Generate PDF and send emails in background
+          Promise.all([
+            supabase.functions.invoke('generate-po-pdf', { body: { po_id: po.id } }),
+            supabase.functions.invoke('send-email', { 
+              body: { type: 'po_approved_contractor', po_id: po.id } 
+            }),
+            supabase.functions.invoke('send-email', { 
+              body: { type: 'po_approved_accounts', po_id: po.id } 
+            }),
+            supabase.functions.invoke('send-email', { 
+              body: { type: 'po_approved_pm', po_id: po.id } 
+            }),
+          ]).catch(err => {
+            console.error('Background tasks failed:', err);
+            toast.error('PO approved but PDF/email may have failed');
+          });
+
+          // Notify PM and accounts
+          if (po.created_by_user_id !== user.id) {
+            await supabase.from('notifications').insert({
+              user_id: po.created_by_user_id,
+              organisation_id: user.organisation_id,
+              type: 'po_approved',
+              title: 'PO Approved',
+              message: `Your Purchase Order ${po.po_number} has been approved`,
+              link: `/pos/${po.id}`,
+              related_po_id: po.id,
+            });
+          }
+
+          const { data: accountsUsers } = await supabase
+            .from('users')
+            .select('id')
+            .eq('organisation_id', user.organisation_id)
+            .in('role', ['ACCOUNTS', 'ADMIN'])
+            .eq('is_active', true)
+            .neq('id', user.id);
+
+          if (accountsUsers && accountsUsers.length > 0) {
+            await supabase.from('notifications').insert(
+              accountsUsers.map((accountsUser) => ({
+                user_id: accountsUser.id,
+                organisation_id: user.organisation_id,
+                type: 'po_approved_for_invoice',
+                title: 'PO Ready for Invoice',
+                message: `PO ${po.po_number} approved. Ready for invoice matching.`,
+                link: `/invoices`,
+                related_po_id: po.id,
+              }))
+            );
+          }
+
+          toast.success(`PO fully approved (${autoCompletableSteps.length} step(s) auto-completed)`);
+          fetchPO();
+          fetchApprovalLogs();
+          return;
+        }
+      }
+
       if (nextStep && nextStep.nextStatus) {
-        // Route to next approver
+        // Route to next approver (standard flow)
         const { error: updateError } = await supabase
           .from('purchase_orders')
           .update({ status: nextStep.nextStatus as any })

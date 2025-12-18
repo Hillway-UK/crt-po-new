@@ -455,6 +455,81 @@ export function useApprovalWorkflow() {
     return null;
   }, [getApplicableSteps]);
 
+  /**
+   * Role hierarchy for determining if a higher role can approve on behalf of lower roles
+   * Higher number = higher authority
+   */
+  const getRoleHierarchy = useCallback((role: UserRole): number => {
+    const hierarchy: Record<UserRole, number> = {
+      'PROPERTY_MANAGER': 1,
+      'ACCOUNTS': 2,
+      'MD': 3,
+      'ADMIN': 4, // ADMIN has same authority as CEO
+      'CEO': 4,
+    };
+    return hierarchy[role] || 0;
+  }, []);
+
+  /**
+   * Check if a role has authority to approve at a given step
+   */
+  const canRoleApproveStep = useCallback((approverRole: UserRole, stepRole: UserRole): boolean => {
+    return getRoleHierarchy(approverRole) >= getRoleHierarchy(stepRole);
+  }, [getRoleHierarchy]);
+
+  /**
+   * Get all remaining steps that the current approver can complete in one action
+   * This enables "Higher Role Auto-Completion" - when CEO/Admin approves at MD step,
+   * they automatically complete the CEO step too.
+   */
+  const getAutoCompletableSteps = useCallback((
+    currentStatus: POStatus,
+    amount: number,
+    approverRole: UserRole
+  ): { role: UserRole; status: POStatus }[] => {
+    const steps = getApplicableSteps(amount, 'PO');
+    const completableSteps: { role: UserRole; status: POStatus }[] = [];
+    
+    // Find current step index based on status
+    let currentStepIndex = -1;
+    
+    if (currentStatus === 'PENDING_PM_APPROVAL') {
+      currentStepIndex = steps.findIndex(s => s.role === 'PROPERTY_MANAGER');
+    } else if (currentStatus === 'PENDING_MD_APPROVAL') {
+      currentStepIndex = steps.findIndex(s => s.role === 'MD');
+    } else if (currentStatus === 'PENDING_CEO_APPROVAL') {
+      currentStepIndex = steps.findIndex(s => s.role === 'CEO');
+    }
+
+    // Check all subsequent steps
+    for (let i = currentStepIndex + 1; i < steps.length; i++) {
+      const step = steps[i];
+      // If approver has authority over this step, they can auto-complete it
+      if (canRoleApproveStep(approverRole, step.role)) {
+        let status: POStatus;
+        switch (step.role) {
+          case 'PROPERTY_MANAGER':
+            status = 'PENDING_PM_APPROVAL';
+            break;
+          case 'MD':
+            status = 'PENDING_MD_APPROVAL';
+            break;
+          case 'CEO':
+            status = 'PENDING_CEO_APPROVAL';
+            break;
+          default:
+            status = 'PENDING_MD_APPROVAL';
+        }
+        completableSteps.push({ role: step.role, status });
+      } else {
+        // Stop at first step where approver doesn't have authority
+        break;
+      }
+    }
+
+    return completableSteps;
+  }, [getApplicableSteps, canRoleApproveStep]);
+
   return {
     workflows,
     workflowSettings,
@@ -471,5 +546,8 @@ export function useApprovalWorkflow() {
     getApplicableSteps,
     getInitialApprovalInfo,
     getNextApprovalStep,
+    getRoleHierarchy,
+    canRoleApproveStep,
+    getAutoCompletableSteps,
   };
 }
