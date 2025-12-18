@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { PurchaseOrder, Invoice, UserRole, ApprovalWorkflow } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDelegation } from '@/hooks/useDelegation';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from 'sonner';
 import { CheckCircle2, XCircle, Eye, Clock, Loader2, AlertCircle } from 'lucide-react';
@@ -26,6 +27,7 @@ interface WorkflowSettings {
 export default function Approvals() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isActiveDelegate, activeDelegatesForMD } = useDelegation();
   const [allPendingPOs, setAllPendingPOs] = useState<PurchaseOrder[]>([]);
   const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,63 +109,50 @@ export default function Approvals() {
     }
   };
 
-  // Filter POs based on user role and workflow configuration
+  // Filter POs based on user role, workflow configuration, and delegation
   const pendingPOs = useMemo(() => {
-    if (!user?.role) return [];
+    if (!user?.role || !user?.id) return [];
+
+    // Check if current user is an active delegate for MD
+    const userIsDelegate = isActiveDelegate(user.id);
 
     return allPendingPOs.filter(po => {
       const poStatus = po.status;
 
       // PROPERTY_MANAGER: Only see PENDING_PM_APPROVAL POs
       if (user.role === 'PROPERTY_MANAGER') {
-        return poStatus === 'PENDING_PM_APPROVAL';
+        // PM can also see PENDING_MD_APPROVAL if they are an active delegate
+        if (poStatus === 'PENDING_PM_APPROVAL') return true;
+        if (poStatus === 'PENDING_MD_APPROVAL' && userIsDelegate) return true;
+        return false;
       }
 
-      // ACCOUNTS: No approval authority for POs, but can view for awareness
+      // ACCOUNTS: Can see PENDING_MD_APPROVAL if they are an active delegate
       if (user.role === 'ACCOUNTS') {
-        return false; // Accounts doesn't approve POs
+        if (poStatus === 'PENDING_MD_APPROVAL' && userIsDelegate) return true;
+        return false;
       }
 
-      // MD: See PENDING_MD_APPROVAL and can also see PENDING_CEO_APPROVAL (for awareness, but can't approve)
+      // MD: See PENDING_MD_APPROVAL only (not CEO level)
       if (user.role === 'MD') {
         return poStatus === 'PENDING_MD_APPROVAL';
       }
 
-      // CEO/ADMIN: Check workflow configuration
-      if (user.role === 'CEO' || user.role === 'ADMIN') {
-        // Always show PENDING_CEO_APPROVAL POs
-        if (poStatus === 'PENDING_CEO_APPROVAL') {
-          return true;
-        }
+      // ADMIN: Can see PENDING_PM_APPROVAL and PENDING_MD_APPROVAL (same authority as MD)
+      // But NOT PENDING_CEO_APPROVAL (that's CEO only)
+      if (user.role === 'ADMIN') {
+        return poStatus === 'PENDING_PM_APPROVAL' || poStatus === 'PENDING_MD_APPROVAL';
+      }
 
-        // For PENDING_MD_APPROVAL, check if CEO step is sequential
-        if (poStatus === 'PENDING_MD_APPROVAL') {
-          if (workflowSettings.use_custom_workflows) {
-            // Custom workflows: Check if CEO step requires previous approval
-            const defaultWorkflow = workflows.find(
-              w => w.is_default && w.workflow_type === 'PO' && w.is_active
-            );
-            
-            if (defaultWorkflow?.steps) {
-              const ceoStep = defaultWorkflow.steps.find(s => s.approver_role === 'CEO');
-              // If CEO step requires_previous_approval is false, CEO can see MD-level POs
-              return ceoStep?.requires_previous_approval === false;
-            }
-          }
-          // Quick thresholds or no workflow: CEO approval is always sequential after MD
-          // So CEO should NOT see PENDING_MD_APPROVAL POs
-          return false;
-        }
-
-        // PENDING_PM_APPROVAL - CEO/Admin can see and approve these (higher authority)
-        if (poStatus === 'PENDING_PM_APPROVAL') {
-          return true;
-        }
+      // CEO: ONLY see PENDING_CEO_APPROVAL POs
+      // CEO CANNOT see or approve PENDING_MD_APPROVAL POs (sequential enforcement)
+      if (user.role === 'CEO') {
+        return poStatus === 'PENDING_CEO_APPROVAL';
       }
 
       return false;
     });
-  }, [allPendingPOs, user?.role, workflowSettings, workflows]);
+  }, [allPendingPOs, user?.role, user?.id, isActiveDelegate]);
 
   const fetchPendingInvoices = async () => {
     try {

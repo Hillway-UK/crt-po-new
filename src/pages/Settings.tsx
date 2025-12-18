@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DelegationManager } from "@/components/delegations/DelegationManager";
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -235,6 +236,9 @@ export default function Settings() {
               </CardDescription>
             </CardHeader>
           </Card>
+
+          {/* MD Delegation Section - Only visible to MD users */}
+          {user?.role === 'MD' && <DelegationManager />}
 
           <div className="grid gap-6">
             <Card>
