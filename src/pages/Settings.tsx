@@ -199,11 +199,11 @@ export default function Settings() {
     }
   };
 
-  if (user?.role !== "ADMIN" && user?.role !== "CEO") {
+  if (user?.role !== "ADMIN" && user?.role !== "CEO" && user?.role !== "MD") {
     return (
       <MainLayout title="Settings">
         <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Access denied. Admin or CEO only.</div>
+          <div className="text-muted-foreground">Access denied. Admin, CEO, or MD only.</div>
         </div>
       </MainLayout>
     );
