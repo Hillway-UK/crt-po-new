@@ -13,6 +13,7 @@ import { PurchaseOrder, POApprovalLog, POStatus } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApprovalWorkflow } from '@/hooks/useApprovalWorkflow';
+import { useDelegation } from '@/hooks/useDelegation';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters';
 import { toast } from 'sonner';
 import { CheckCircle, XCircle, Edit, Trash2, Send, FileText, AlertTriangle, Download, Mail, Eye } from 'lucide-react';
@@ -25,7 +26,8 @@ export default function PODetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { getNextApprovalStep, getAutoCompletableSteps } = useApprovalWorkflow();
+  const { getNextApprovalStep, getAutoCompletableSteps, canUserApproveAtStatus } = useApprovalWorkflow();
+  const { isActiveDelegate, getMDsForDelegate } = useDelegation();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [approvalLogs, setApprovalLogs] = useState<POApprovalLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,9 +85,40 @@ export default function PODetail() {
   const handleApprove = async () => {
     if (!po || !user) return;
 
+    // CEO HARD BLOCK: CEO cannot approve before CEO step
+    if (user.role === 'CEO' && po.status !== 'PENDING_CEO_APPROVAL') {
+      toast.error('CEO cannot approve before the CEO approval step');
+      return;
+    }
+
+    // Check if user is an active delegate for MD step
+    const userIsDelegate = isActiveDelegate(user.id);
+    
+    // Verify approval eligibility
+    const canApprove = canUserApproveAtStatus(user.role, po.status, userIsDelegate);
+    if (!canApprove) {
+      toast.error('You are not authorized to approve this PO at its current stage');
+      return;
+    }
+
     setProcessing(true);
     try {
       const poAmount = Number(po.amount_inc_vat);
+
+      // Determine if this is a delegated approval (non-MD approving MD step)
+      const isDelegatedApproval = po.status === 'PENDING_MD_APPROVAL' && 
+        user.role !== 'MD' && 
+        user.role !== 'ADMIN' && 
+        userIsDelegate;
+
+      // Get the MD user ID if this is a delegated approval
+      let approvedOnBehalfOfUserId: string | null = null;
+      if (isDelegatedApproval) {
+        const mds = await getMDsForDelegate(user.id);
+        if (mds.length > 0) {
+          approvedOnBehalfOfUserId = mds[0].id;
+        }
+      }
 
       // Check if there are steps this approver can auto-complete
       const autoCompletableSteps = getAutoCompletableSteps(po.status, poAmount, user.role);
@@ -102,18 +135,22 @@ export default function PODetail() {
         if (canCompleteAll) {
           // Auto-complete: Log the current step approval
           const roleLabel = user.role === 'PROPERTY_MANAGER' ? 'PM' : user.role;
-          await supabase.from('po_approval_logs').insert([{
+          const delegateNote = isDelegatedApproval ? ` (on behalf of MD)` : '';
+          
+          await (supabase as any).from('po_approval_logs').insert([{
             po_id: po.id,
             action_by_user_id: user.id,
+            approved_on_behalf_of_user_id: approvedOnBehalfOfUserId,
             action: 'APPROVED',
-            comment: `${roleLabel} approved (acting at ${po.status.replace('PENDING_', '').replace('_APPROVAL', '')} step)`,
+            comment: `${roleLabel} approved${delegateNote} (acting at ${po.status.replace('PENDING_', '').replace('_APPROVAL', '')} step)`,
           }]);
 
           // Log auto-completed steps
           for (const step of autoCompletableSteps) {
-            await supabase.from('po_approval_logs').insert([{
+            await (supabase as any).from('po_approval_logs').insert([{
               po_id: po.id,
               action_by_user_id: user.id,
+              approved_on_behalf_of_user_id: approvedOnBehalfOfUserId,
               action: 'APPROVED',
               comment: `Auto-approved ${step.role} step (same approver has authority)`,
             }]);
@@ -199,13 +236,16 @@ export default function PODetail() {
 
         if (updateError) throw updateError;
 
-        // Log approval action
+        // Log approval action with delegation info
         const roleLabel = user.role === 'PROPERTY_MANAGER' ? 'PM' : user.role;
-        await supabase.from('po_approval_logs').insert([{
+        const delegateNote = isDelegatedApproval ? ` (on behalf of MD)` : '';
+        
+        await (supabase as any).from('po_approval_logs').insert([{
           po_id: po.id,
           action_by_user_id: user.id,
+          approved_on_behalf_of_user_id: approvedOnBehalfOfUserId,
           action: 'APPROVED',
-          comment: `${roleLabel} approved - routed to ${nextStep.nextRole} for approval`,
+          comment: `${roleLabel} approved${delegateNote} - routed to ${nextStep.nextRole} for approval`,
         }]);
 
         // Notify next approver users
@@ -261,10 +301,14 @@ export default function PODetail() {
 
       if (updateError) throw updateError;
 
-      await supabase.from('po_approval_logs').insert([{
+      // Log with delegation info
+      const delegateNote = isDelegatedApproval ? ` (on behalf of MD)` : '';
+      await (supabase as any).from('po_approval_logs').insert([{
         po_id: po.id,
         action_by_user_id: user.id,
+        approved_on_behalf_of_user_id: approvedOnBehalfOfUserId,
         action: 'APPROVED',
+        comment: isDelegatedApproval ? `Approved${delegateNote}` : null,
       }]);
 
       // Generate PDF and send emails in background

@@ -458,13 +458,16 @@ export function useApprovalWorkflow() {
   /**
    * Role hierarchy for determining if a higher role can approve on behalf of lower roles
    * Higher number = higher authority
+   * 
+   * IMPORTANT: This hierarchy is used for PM approval only.
+   * CEO cannot bypass MD step - sequential approval is enforced.
    */
   const getRoleHierarchy = useCallback((role: UserRole): number => {
     const hierarchy: Record<UserRole, number> = {
       'PROPERTY_MANAGER': 1,
       'ACCOUNTS': 2,
       'MD': 3,
-      'ADMIN': 4, // ADMIN has same authority as CEO
+      'ADMIN': 3, // ADMIN has same authority as MD for approval purposes
       'CEO': 4,
     };
     return hierarchy[role] || 0;
@@ -472,21 +475,92 @@ export function useApprovalWorkflow() {
 
   /**
    * Check if a role has authority to approve at a given step
+   * 
+   * CRITICAL: CEO cannot approve MD step. Sequential approval is enforced.
+   * This prevents CEO from bypassing the MD approval workflow.
    */
   const canRoleApproveStep = useCallback((approverRole: UserRole, stepRole: UserRole): boolean => {
-    return getRoleHierarchy(approverRole) >= getRoleHierarchy(stepRole);
-  }, [getRoleHierarchy]);
+    // CEO HARD BLOCK: CEO cannot approve MD step
+    if (approverRole === 'CEO' && stepRole === 'MD') {
+      return false;
+    }
+    
+    // CEO can only approve CEO step
+    if (approverRole === 'CEO') {
+      return stepRole === 'CEO';
+    }
+    
+    // MD and ADMIN can approve PM and MD steps
+    if (approverRole === 'MD' || approverRole === 'ADMIN') {
+      return stepRole === 'PROPERTY_MANAGER' || stepRole === 'MD';
+    }
+    
+    // PM can only approve PM steps
+    if (approverRole === 'PROPERTY_MANAGER') {
+      return stepRole === 'PROPERTY_MANAGER';
+    }
+    
+    return false;
+  }, []);
+
+  /**
+   * Check if a user can approve a PO at its current status
+   * Takes into account role AND delegation
+   * 
+   * @param userRole - The role of the user attempting to approve
+   * @param userId - The ID of the user attempting to approve
+   * @param currentStatus - The current PO status
+   * @param isDelegate - Whether the user is an active delegate for MD
+   */
+  const canUserApproveAtStatus = useCallback((
+    userRole: UserRole,
+    currentStatus: POStatus,
+    isDelegate: boolean = false
+  ): boolean => {
+    // CEO HARD BLOCK: CEO cannot approve before CEO step
+    if (userRole === 'CEO' && currentStatus !== 'PENDING_CEO_APPROVAL') {
+      return false;
+    }
+    
+    switch (currentStatus) {
+      case 'PENDING_PM_APPROVAL':
+        // PM, MD, ADMIN can approve PM steps
+        return ['PROPERTY_MANAGER', 'MD', 'ADMIN'].includes(userRole);
+        
+      case 'PENDING_MD_APPROVAL':
+        // MD can approve, or active delegates can approve
+        // CEO CANNOT approve MD step
+        if (userRole === 'CEO') return false;
+        if (userRole === 'MD' || userRole === 'ADMIN') return true;
+        return isDelegate; // Delegates can approve on behalf of MD
+        
+      case 'PENDING_CEO_APPROVAL':
+        // Only CEO and ADMIN can approve CEO steps
+        return userRole === 'CEO' || userRole === 'ADMIN';
+        
+      default:
+        return false;
+    }
+  }, []);
 
   /**
    * Get all remaining steps that the current approver can complete in one action
-   * This enables "Higher Role Auto-Completion" - when CEO/Admin approves at MD step,
-   * they automatically complete the CEO step too.
+   * 
+   * DISABLED FOR CEO: CEO cannot auto-complete MD steps.
+   * This enforces sequential approval: MD must approve before CEO.
+   * 
+   * Only MD/ADMIN can auto-complete PM steps when they have higher authority.
    */
   const getAutoCompletableSteps = useCallback((
     currentStatus: POStatus,
     amount: number,
     approverRole: UserRole
   ): { role: UserRole; status: POStatus }[] => {
+    // CEO CANNOT auto-complete any steps - sequential approval enforced
+    if (approverRole === 'CEO') {
+      return [];
+    }
+    
     const steps = getApplicableSteps(amount, 'PO');
     const completableSteps: { role: UserRole; status: POStatus }[] = [];
     
@@ -501,10 +575,16 @@ export function useApprovalWorkflow() {
       currentStepIndex = steps.findIndex(s => s.role === 'CEO');
     }
 
-    // Check all subsequent steps
+    // Check subsequent steps (but NOT CEO steps - those require explicit CEO approval)
     for (let i = currentStepIndex + 1; i < steps.length; i++) {
       const step = steps[i];
-      // If approver has authority over this step, they can auto-complete it
+      
+      // NEVER auto-complete CEO step
+      if (step.role === 'CEO') {
+        break;
+      }
+      
+      // MD/ADMIN can auto-complete PM steps
       if (canRoleApproveStep(approverRole, step.role)) {
         let status: POStatus;
         switch (step.role) {
@@ -514,15 +594,11 @@ export function useApprovalWorkflow() {
           case 'MD':
             status = 'PENDING_MD_APPROVAL';
             break;
-          case 'CEO':
-            status = 'PENDING_CEO_APPROVAL';
-            break;
           default:
             status = 'PENDING_MD_APPROVAL';
         }
         completableSteps.push({ role: step.role, status });
       } else {
-        // Stop at first step where approver doesn't have authority
         break;
       }
     }
@@ -548,6 +624,7 @@ export function useApprovalWorkflow() {
     getNextApprovalStep,
     getRoleHierarchy,
     canRoleApproveStep,
+    canUserApproveAtStatus,
     getAutoCompletableSteps,
   };
 }
