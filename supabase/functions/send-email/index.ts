@@ -10,10 +10,11 @@ const corsHeaders = {
 };
 
 interface EmailRequest {
-  type: 'po_approval_request' | 'po_pm_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'user_invitation';
+  type: 'po_approval_request' | 'po_pm_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'user_invitation' | 'delegation_assigned';
   po_id?: string;
   invoice_id?: string;
   invitation_id?: string;
+  delegation_id?: string;
   template?: string;
   data?: Record<string, any>;
 }
@@ -24,7 +25,7 @@ serve(async (req) => {
   }
 
   try {
-    const { type, po_id, invoice_id, invitation_id }: EmailRequest = await req.json();
+    const { type, po_id, invoice_id, invitation_id, delegation_id }: EmailRequest = await req.json();
 
     if (!type) {
       return new Response(
@@ -209,11 +210,146 @@ serve(async (req) => {
     let emailResult;
 
     switch (type) {
-      case 'po_approval_request':
-        // Get all MD/ADMIN recipients or fallback to configured mdEmail
-        const approvalRecipients = mdAdminUsers.length > 0 
+      case 'delegation_assigned': {
+        if (!delegation_id) {
+          throw new Error('delegation_id is required for delegation_assigned email');
+        }
+        
+        // Fetch the delegation with delegator and delegate info
+        const { data: delegation, error: delegationError } = await supabase
+          .from('approval_delegations')
+          .select(`
+            *,
+            delegator:users!delegator_user_id(*),
+            delegate:users!delegate_user_id(*)
+          `)
+          .eq('id', delegation_id)
+          .single();
+        
+        if (delegationError || !delegation) {
+          console.error('Error fetching delegation:', delegationError);
+          throw new Error('Delegation not found');
+        }
+        
+        const delegatorName = delegation.delegator?.full_name || 'An MD';
+        const delegateName = delegation.delegate?.full_name || 'Delegate';
+        const delegateEmail = delegation.delegate?.email;
+        
+        if (!delegateEmail) {
+          throw new Error('Delegate email not found');
+        }
+        
+        // Format date range info
+        let dateInfo = 'Your delegation is active immediately and indefinitely.';
+        if (delegation.starts_at && delegation.ends_at) {
+          dateInfo = `Your delegation is active from ${formatDate(delegation.starts_at)} until ${formatDate(delegation.ends_at)}.`;
+        } else if (delegation.starts_at) {
+          dateInfo = `Your delegation will be active from ${formatDate(delegation.starts_at)} onwards.`;
+        } else if (delegation.ends_at) {
+          dateInfo = `Your delegation is active immediately until ${formatDate(delegation.ends_at)}.`;
+        }
+        
+        console.log(`Sending delegation assignment email to ${delegateEmail}`);
+        
+        emailResult = await resend.emails.send({
+          from: formatFromEmail(mdEmail, 'CRT Property Approvals'),
+          to: [delegateEmail],
+          subject: `You've been assigned as an Approval Delegate`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: linear-gradient(135deg, #6B4190 0%, #5A3576 100%); color: white; padding: 30px; text-align: center;">
+                <h1 style="margin: 0;">Approval Delegation</h1>
+                <p style="margin: 10px 0 0 0; opacity: 0.9;">You've been assigned as a delegate</p>
+              </div>
+              
+              <div style="padding: 30px; background: #f9fafb;">
+                <p style="font-size: 16px; color: #333;">
+                  Dear ${delegateName},
+                </p>
+                
+                <p style="color: #666; line-height: 1.6;">
+                  <strong>${delegatorName}</strong> has assigned you as an approval delegate for Purchase Orders.
+                </p>
+                
+                <div style="background: white; border-left: 4px solid #6B4190; padding: 20px; margin: 20px 0;">
+                  <h3 style="margin: 0 0 15px 0; color: #6B4190;">What this means:</h3>
+                  <ul style="margin: 0; padding-left: 20px; color: #333; line-height: 1.8;">
+                    <li>You can now approve POs on behalf of ${delegatorName}</li>
+                    <li>You will receive approval request notifications</li>
+                    <li>Your approvals will be logged as "on behalf of ${delegatorName}"</li>
+                  </ul>
+                </div>
+                
+                <div style="background: #f3f4f6; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                  <p style="margin: 0; color: #666;">
+                    ${dateInfo}
+                  </p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                  <a href="${appUrl}/approvals" 
+                     style="display: inline-block; background: #6B4190; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; font-weight: bold;">
+                    View Pending Approvals
+                  </a>
+                </div>
+              </div>
+              
+              <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                <p>CRT Property Investments Ltd<br>
+                1 Waterside Park, Valley Way, Wombwell, Barnsley, S73 0BB</p>
+              </div>
+            </div>
+          `,
+        });
+        break;
+      }
+
+      case 'po_approval_request': {
+        // Get all MD/ADMIN recipients
+        let approvalRecipients = mdAdminUsers.length > 0 
           ? mdAdminUsers.map(u => u.email) 
           : [mdEmail];
+        
+        // Fetch active delegates for all MDs in the organization
+        if (orgId) {
+          const { data: mdUsers } = await supabase
+            .from('users')
+            .select('id')
+            .eq('organisation_id', orgId)
+            .eq('role', 'MD')
+            .eq('is_active', true);
+          
+          if (mdUsers && mdUsers.length > 0) {
+            const mdIds = mdUsers.map(u => u.id);
+            
+            const { data: activeDelegations } = await supabase
+              .from('approval_delegations')
+              .select(`
+                *,
+                delegate:users!delegate_user_id(email, full_name)
+              `)
+              .in('delegator_user_id', mdIds)
+              .eq('scope', 'PO_APPROVAL')
+              .eq('is_active', true);
+            
+            if (activeDelegations && activeDelegations.length > 0) {
+              const now = new Date();
+              const activeDelegateEmails = activeDelegations
+                .filter((d: any) => {
+                  const startsAt = d.starts_at ? new Date(d.starts_at) : null;
+                  const endsAt = d.ends_at ? new Date(d.ends_at) : null;
+                  const afterStart = !startsAt || now >= startsAt;
+                  const beforeEnd = !endsAt || now <= endsAt;
+                  return afterStart && beforeEnd;
+                })
+                .map((d: any) => d.delegate?.email)
+                .filter(Boolean);
+              
+              // Merge with existing recipients and dedupe
+              approvalRecipients = [...new Set([...approvalRecipients, ...activeDelegateEmails])];
+            }
+          }
+        }
         
         console.log(`Sending PO approval request to ${approvalRecipients.length} recipient(s):`, approvalRecipients);
         
@@ -284,6 +420,7 @@ serve(async (req) => {
           `,
         });
         break;
+      }
 
       case 'po_pm_approval_request':
         // Get all PM/ADMIN recipients or fallback to configured pmEmail

@@ -178,12 +178,12 @@ export function useDelegation() {
     startsAt?: Date | null,
     endsAt?: Date | null
   ): Promise<boolean> => {
-    if (!user?.id) return false;
+    if (!user?.id || !user?.organisation_id) return false;
 
     // Validate delegate is not CEO
     const { data: delegateUser } = await supabase
       .from('users')
-      .select('role')
+      .select('role, full_name')
       .eq('id', delegateUserId)
       .single();
 
@@ -193,7 +193,7 @@ export function useDelegation() {
     }
 
     try {
-      const { error } = await (supabase as any)
+      const { data: newDelegation, error } = await (supabase as any)
         .from('approval_delegations')
         .insert({
           delegator_user_id: user.id,
@@ -202,7 +202,9 @@ export function useDelegation() {
           starts_at: startsAt?.toISOString() || null,
           ends_at: endsAt?.toISOString() || null,
           is_active: true,
-        });
+        })
+        .select()
+        .single();
 
       if (error) {
         if (error.code === '23505') {
@@ -211,6 +213,33 @@ export function useDelegation() {
           throw error;
         }
         return false;
+      }
+
+      // Create in-app notification for the delegate
+      const notificationMessage = startsAt 
+        ? `${user.full_name} has assigned you as their approval delegate starting ${startsAt.toLocaleDateString()}.`
+        : `${user.full_name} has assigned you as their approval delegate. You can now approve POs on their behalf.`;
+
+      await supabase.from('notifications').insert({
+        user_id: delegateUserId,
+        organisation_id: user.organisation_id,
+        title: 'You are now an Approval Delegate',
+        message: notificationMessage,
+        type: 'delegation_assigned',
+        link: '/approvals',
+      });
+
+      // Send email notification to the delegate
+      try {
+        await supabase.functions.invoke('send-email', {
+          body: {
+            type: 'delegation_assigned',
+            delegation_id: newDelegation.id,
+          },
+        });
+      } catch (emailError) {
+        console.error('Failed to send delegation email:', emailError);
+        // Don't fail the entire operation if email fails
       }
 
       toast.success('Delegate added successfully');
