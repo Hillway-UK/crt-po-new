@@ -3,6 +3,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,7 +13,7 @@ import { User, UserRole } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { UserCog, Shield, Mail, Phone, Plus, Loader2 } from 'lucide-react';
+import { UserCog, Shield, Mail, Phone, Plus, Loader2, UserX, UserCheck } from 'lucide-react';
 
 export default function UserManagement() {
   const { user } = useAuth();
@@ -24,6 +25,8 @@ export default function UserManagement() {
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<UserRole>('PROPERTY_MANAGER');
   const [sendingInvite, setSendingInvite] = useState(false);
+  const [statusChangeUser, setStatusChangeUser] = useState<User | null>(null);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
 
   useEffect(() => {
     if (user?.role === 'ADMIN' || user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'PROPERTY_MANAGER') {
@@ -70,6 +73,28 @@ export default function UserManagement() {
       setEditingUser(null);
     } catch (error) {
       toast.error('Failed to update user role');
+      console.error(error);
+    }
+  };
+
+  const handleToggleUserStatus = async () => {
+    if (!statusChangeUser) return;
+    
+    try {
+      const newStatus = !statusChangeUser.is_active;
+      const { error } = await supabase
+        .from('users')
+        .update({ is_active: newStatus })
+        .eq('id', statusChangeUser.id);
+
+      if (error) throw error;
+      
+      toast.success(`User ${newStatus ? 'activated' : 'deactivated'} successfully`);
+      fetchUsers();
+      setStatusDialogOpen(false);
+      setStatusChangeUser(null);
+    } catch (error) {
+      toast.error('Failed to update user status');
       console.error(error);
     }
   };
@@ -279,7 +304,7 @@ export default function UserManagement() {
               </TableHeader>
               <TableBody>
                 {users.map((u) => (
-                  <TableRow key={u.id}>
+                  <TableRow key={u.id} className={!u.is_active ? 'opacity-60' : ''}>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {getRoleIcon(u.role)}
@@ -305,52 +330,79 @@ export default function UserManagement() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={u.is_active ? "default" : "secondary"}>
+                      <Badge 
+                        variant={u.is_active ? "default" : "secondary"}
+                        className={u.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}
+                      >
                         {u.is_active ? 'Active' : 'Inactive'}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      {(user?.role === 'ADMIN' || user?.role === 'MD' || user?.role === 'CEO') && u.id !== user.id && (
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" onClick={() => setEditingUser(u)}>
-                              Edit Role
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Edit User Role</DialogTitle>
-                              <DialogDescription>
-                                Change the role for {u.full_name}
-                              </DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-4 py-4">
-                              <div className="space-y-2">
-                                <Label>Current Role</Label>
-                                <p className="text-sm">{getRoleBadge(u.role)}</p>
+                      <div className="flex items-center justify-end gap-2">
+                        {(user?.role === 'ADMIN' || user?.role === 'MD' || user?.role === 'CEO') && u.id !== user.id && (
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={() => setEditingUser(u)}>
+                                Edit Role
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Edit User Role</DialogTitle>
+                                <DialogDescription>
+                                  Change the role for {u.full_name}
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="space-y-4 py-4">
+                                <div className="space-y-2">
+                                  <Label>Current Role</Label>
+                                  <p className="text-sm">{getRoleBadge(u.role)}</p>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label htmlFor="new-role">New Role</Label>
+                                  <Select 
+                                    defaultValue={u.role}
+                                    onValueChange={(value) => handleUpdateUserRole(u.id, value as UserRole)}
+                                  >
+                                    <SelectTrigger id="new-role">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="PROPERTY_MANAGER">Property Manager</SelectItem>
+                                      <SelectItem value="ACCOUNTS">Accounts</SelectItem>
+                                      <SelectItem value="MD">Managing Director</SelectItem>
+                                      <SelectItem value="CEO">CEO</SelectItem>
+                                      <SelectItem value="ADMIN">Admin</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
                               </div>
-                              <div className="space-y-2">
-                                <Label htmlFor="new-role">New Role</Label>
-                                <Select 
-                                  defaultValue={u.role}
-                                  onValueChange={(value) => handleUpdateUserRole(u.id, value as UserRole)}
-                                >
-                                  <SelectTrigger id="new-role">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="PROPERTY_MANAGER">Property Manager</SelectItem>
-                                    <SelectItem value="ACCOUNTS">Accounts</SelectItem>
-                                    <SelectItem value="MD">Managing Director</SelectItem>
-                                    <SelectItem value="CEO">CEO</SelectItem>
-                                    <SelectItem value="ADMIN">Admin</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
-                      )}
+                            </DialogContent>
+                          </Dialog>
+                        )}
+                        {user?.role === 'ADMIN' && u.id !== user.id && (
+                          <Button
+                            variant={u.is_active ? "destructive" : "default"}
+                            size="sm"
+                            onClick={() => {
+                              setStatusChangeUser(u);
+                              setStatusDialogOpen(true);
+                            }}
+                          >
+                            {u.is_active ? (
+                              <>
+                                <UserX className="mr-1 h-3 w-3" />
+                                Deactivate
+                              </>
+                            ) : (
+                              <>
+                                <UserCheck className="mr-1 h-3 w-3" />
+                                Reactivate
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -359,6 +411,39 @@ export default function UserManagement() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Status Change Confirmation Dialog */}
+      <AlertDialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {statusChangeUser?.is_active ? 'Deactivate User' : 'Reactivate User'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {statusChangeUser?.is_active ? (
+                <>
+                  Are you sure you want to deactivate <strong>{statusChangeUser?.full_name}</strong>? 
+                  They will no longer be able to log in or access the system.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to reactivate <strong>{statusChangeUser?.full_name}</strong>? 
+                  They will be able to log in and access the system again.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setStatusChangeUser(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleToggleUserStatus}
+              className={statusChangeUser?.is_active ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''}
+            >
+              {statusChangeUser?.is_active ? 'Deactivate' : 'Reactivate'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

@@ -22,6 +22,7 @@ export type Database = {
           is_required: boolean | null
           max_amount: number | null
           min_amount: number | null
+          requires_previous_approval: boolean | null
           skip_if_below_amount: number | null
           step_order: number
           workflow_id: string | null
@@ -33,6 +34,7 @@ export type Database = {
           is_required?: boolean | null
           max_amount?: number | null
           min_amount?: number | null
+          requires_previous_approval?: boolean | null
           skip_if_below_amount?: number | null
           step_order: number
           workflow_id?: string | null
@@ -44,6 +46,7 @@ export type Database = {
           is_required?: boolean | null
           max_amount?: number | null
           min_amount?: number | null
+          requires_previous_approval?: boolean | null
           skip_if_below_amount?: number | null
           step_order?: number
           workflow_id?: string | null
