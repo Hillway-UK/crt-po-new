@@ -254,7 +254,7 @@ export default function WorkflowSettings() {
                   onChange={(e) => setAutoApproveAmount(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  POs below this amount can be approved directly by the PM
+                  POs below this amount can be approved directly by the PM. <span className="font-medium">Leave empty if all POs should require MD approval.</span>
                 </p>
               </div>
               
@@ -268,10 +268,24 @@ export default function WorkflowSettings() {
                   onChange={(e) => setCeoThresholdAmount(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  POs above this amount require CEO approval after MD
+                  POs above this amount require CEO approval after MD. <span className="font-medium">Leave empty if CEO approval should never be required.</span>
                 </p>
               </div>
             </div>
+
+            {/* Informational Alert */}
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>How Thresholds Work</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc list-inside space-y-1 mt-2 text-sm">
+                  <li><span className="font-medium">PM Threshold Empty:</span> All POs require MD approval as the starting point</li>
+                  <li><span className="font-medium">PM Threshold Set:</span> POs below this amount only need PM approval</li>
+                  <li><span className="font-medium">CEO Threshold Empty:</span> MD is the final approver for all amounts</li>
+                  <li><span className="font-medium">CEO Threshold Set:</span> POs above this amount need MD → CEO approval chain</li>
+                </ul>
+              </AlertDescription>
+            </Alert>
 
             <Button onClick={handleSaveThresholds}>Save Thresholds</Button>
 
