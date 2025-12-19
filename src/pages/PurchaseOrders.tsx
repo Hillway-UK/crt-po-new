@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Plus, Search, Eye, Edit, FileText, Clock, CheckCircle, TrendingUp, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/formatters';
+import { downloadStorageFile } from '@/lib/storage';
 import { toast } from 'sonner';
 import { PDFViewerDialog } from '@/components/po/PDFViewerDialog';
 
@@ -315,16 +316,7 @@ export default function PurchaseOrders() {
                             size="icon"
                             onClick={async () => {
                               try {
-                                const response = await fetch(po.pdf_url!);
-                                const blob = await response.blob();
-                                const url = URL.createObjectURL(blob);
-                                const link = document.createElement('a');
-                                link.href = url;
-                                link.download = `PO-${po.po_number}.pdf`;
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                URL.revokeObjectURL(url);
+                                await downloadStorageFile(po.pdf_url!, `PO-${po.po_number}.pdf`);
                               } catch (error) {
                                 console.error('Download failed:', error);
                                 toast.error('Failed to download PDF');

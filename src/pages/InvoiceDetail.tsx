@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,7 +14,7 @@ import { InvoiceStatusBadge } from '@/components/invoices/InvoiceStatusBadge';
 import { ApproveInvoiceDialog } from '@/components/invoices/ApproveInvoiceDialog';
 import { RejectInvoiceDialog } from '@/components/invoices/RejectInvoiceDialog';
 import { MarkAsPaidDialog } from '@/components/invoices/MarkAsPaidDialog';
-import { downloadFile } from '@/lib/fileDownload';
+import { downloadStorageFile, getSignedUrl } from '@/lib/storage';
 import { toast } from 'sonner';
 import type { Invoice } from '@/types';
 
@@ -28,6 +28,25 @@ export default function InvoiceDetail() {
   const [sendingForApproval, setSendingForApproval] = useState(false);
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [downloadingPO, setDownloadingPO] = useState(false);
+  const [viewingPO, setViewingPO] = useState(false);
+
+  const handleViewPOPdf = async () => {
+    if (!invoice?.purchase_order?.pdf_url) return;
+    setViewingPO(true);
+    try {
+      const signedUrl = await getSignedUrl(invoice.purchase_order.pdf_url);
+      if (signedUrl) {
+        window.open(signedUrl, '_blank');
+      } else {
+        toast.error('Failed to get PDF URL');
+      }
+    } catch (error) {
+      console.error('View failed:', error);
+      toast.error('Failed to view PO PDF');
+    } finally {
+      setViewingPO(false);
+    }
+  };
 
   const { data: invoice, isLoading } = useQuery({
     queryKey: ['invoice', id],
@@ -83,7 +102,7 @@ export default function InvoiceDetail() {
         ? `${poNumber}_${invoice.invoice_number}.pdf`
         : `${invoice.invoice_number}.pdf`;
       
-      await downloadFile(invoice.file_url, filename);
+      await downloadStorageFile(invoice.file_url, filename);
       toast.success('Invoice downloaded successfully');
     } catch (error) {
       console.error('Download failed:', error);
@@ -99,7 +118,7 @@ export default function InvoiceDetail() {
     setDownloadingPO(true);
     try {
       const filename = `${invoice.purchase_order.po_number}.pdf`;
-      await downloadFile(invoice.purchase_order.pdf_url, filename);
+      await downloadStorageFile(invoice.purchase_order.pdf_url, filename);
       toast.success('PO downloaded successfully');
     } catch (error) {
       console.error('Download failed:', error);
@@ -349,11 +368,14 @@ export default function InvoiceDetail() {
                   </div>
                   {invoice.purchase_order.pdf_url && (
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={invoice.purchase_order.pdf_url} target="_blank" rel="noopener noreferrer">
-                          <FileText className="mr-2 h-4 w-4" />
-                          View PO PDF
-                        </a>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={handleViewPOPdf}
+                        disabled={viewingPO}
+                      >
+                        <FileText className="mr-2 h-4 w-4" />
+                        {viewingPO ? 'Opening...' : 'View PO PDF'}
                       </Button>
                       <Button 
                         variant="outline" 

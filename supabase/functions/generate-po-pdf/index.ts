@@ -73,17 +73,14 @@ serve(async (req) => {
 
     console.log('PDF uploaded successfully');
 
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('po-documents')
-      .getPublicUrl(`pos/${fileName}`);
+    // Store the storage path (not public URL) for security
+    // The frontend will generate signed URLs when needed
+    const pdfPath = `pos/${fileName}`;
 
-    const pdfUrl = urlData.publicUrl;
-
-    // Update PO with PDF URL
+    // Update PO with the storage path
     const { error: updateError } = await supabase
       .from('purchase_orders')
-      .update({ pdf_url: pdfUrl })
+      .update({ pdf_url: pdfPath })
       .eq('id', po_id);
 
     if (updateError) {
@@ -91,10 +88,10 @@ serve(async (req) => {
       throw updateError;
     }
 
-    console.log('PO updated with PDF URL');
+    console.log('PO updated with storage path:', pdfPath);
 
     return new Response(
-      JSON.stringify({ pdf_url: pdfUrl, success: true }),
+      JSON.stringify({ pdf_url: pdfPath, success: true }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error: any) {
