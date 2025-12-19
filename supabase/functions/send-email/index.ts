@@ -252,7 +252,7 @@ serve(async (req) => {
         console.log(`Sending delegation assignment email to ${delegateEmail}`);
         
         emailResult = await resend.emails.send({
-          from: 'CRT Property Approvals <onboarding@resend.dev>',
+          from: formatFromEmail(defaultNotificationEmail, 'CRT Property Approvals'),
           to: [delegateEmail],
           subject: `You've been assigned as an Approval Delegate`,
           html: `
