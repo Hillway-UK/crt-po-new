@@ -105,24 +105,47 @@ serve(async (req) => {
       invitation = invitationData;
     }
 
+    // Fetch delegation early so we can use its organisation_id for email settings
+    let delegation;
+    if (delegation_id) {
+      console.log(`Fetching delegation for email:`, delegation_id);
+      const { data: delegationData, error: delegationError } = await supabase
+        .from('approval_delegations')
+        .select(`
+          *,
+          delegator:users!delegator_user_id(*),
+          delegate:users!delegate_user_id(*)
+        `)
+        .eq('id', delegation_id)
+        .single();
+
+      if (!delegationError && delegationData) {
+        delegation = delegationData;
+      }
+    }
+
+    // Determine organisation ID from available data
+    const orgId = po?.organisation_id || invoice?.organisation_id || invitation?.organisation_id || delegation?.delegator?.organisation_id;
+
     // Get email settings
     const { data: settings } = await supabase
       .from('settings')
       .select('notify_md_email, contractor_email, notify_pm_email, notify_accounts_email')
-      .eq('organisation_id', po?.organisation_id || invoice?.organisation_id || invitation?.organisation_id)
+      .eq('organisation_id', orgId)
       .single();
 
     // Get organisation for default notification email (accounts_email)
     let defaultNotificationEmail = 'accounts@crtproperty.co.uk';
-    if (po?.organisation_id || invoice?.organisation_id || invitation?.organisation_id) {
+    if (orgId) {
       const { data: org } = await supabase
         .from('organisations')
         .select('accounts_email')
-        .eq('id', po?.organisation_id || invoice?.organisation_id || invitation?.organisation_id)
+        .eq('id', orgId)
         .single();
       
       if (org?.accounts_email) {
         defaultNotificationEmail = org.accounts_email;
+        console.log(`Using organisation email: ${defaultNotificationEmail}`);
       }
     }
 
@@ -131,7 +154,6 @@ serve(async (req) => {
     let accountsAdminUsers: { email: string; full_name: string }[] = [];
     let ceoUsers: { email: string; full_name: string }[] = [];
     let pmUsers: { email: string; full_name: string }[] = [];
-    const orgId = po?.organisation_id || invoice?.organisation_id || invitation?.organisation_id;
     if (orgId) {
       const { data: mdUsers } = await supabase
         .from('users')
@@ -215,19 +237,9 @@ serve(async (req) => {
           throw new Error('delegation_id is required for delegation_assigned email');
         }
         
-        // Fetch the delegation with delegator and delegate info
-        const { data: delegation, error: delegationError } = await supabase
-          .from('approval_delegations')
-          .select(`
-            *,
-            delegator:users!delegator_user_id(*),
-            delegate:users!delegate_user_id(*)
-          `)
-          .eq('id', delegation_id)
-          .single();
-        
-        if (delegationError || !delegation) {
-          console.error('Error fetching delegation:', delegationError);
+        // Delegation was already fetched earlier for org email lookup
+        if (!delegation) {
+          console.error('Delegation not found for id:', delegation_id);
           throw new Error('Delegation not found');
         }
         
