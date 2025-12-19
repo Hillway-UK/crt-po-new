@@ -33,6 +33,12 @@ export function DelegationManager() {
   const [endsAt, setEndsAt] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Reactivation modal state
+  const [reactivateDialogOpen, setReactivateDialogOpen] = useState(false);
+  const [delegationToReactivate, setDelegationToReactivate] = useState<ApprovalDelegation | null>(null);
+  const [reactivateStartsAt, setReactivateStartsAt] = useState<string>('');
+  const [reactivateEndsAt, setReactivateEndsAt] = useState<string>('');
+
   // Fetch available users (excluding CEO and self)
   useEffect(() => {
     const fetchUsers = async () => {
@@ -72,11 +78,41 @@ export function DelegationManager() {
   };
 
   const handleToggleActive = async (delegation: ApprovalDelegation) => {
-    await updateDelegation(delegation.id, { 
-      is_active: !delegation.is_active,
-      starts_at: delegation.starts_at ? new Date(delegation.starts_at) : null,
-      ends_at: delegation.ends_at ? new Date(delegation.ends_at) : null,
+    if (!delegation.is_active) {
+      // Reactivating - show modal to set new dates
+      setDelegationToReactivate(delegation);
+      setReactivateStartsAt(delegation.starts_at 
+        ? new Date(delegation.starts_at).toISOString().slice(0, 16) 
+        : '');
+      setReactivateEndsAt(delegation.ends_at 
+        ? new Date(delegation.ends_at).toISOString().slice(0, 16) 
+        : '');
+      setReactivateDialogOpen(true);
+    } else {
+      // Deactivating - just toggle off directly
+      await updateDelegation(delegation.id, { 
+        is_active: false,
+        starts_at: delegation.starts_at ? new Date(delegation.starts_at) : null,
+        ends_at: delegation.ends_at ? new Date(delegation.ends_at) : null,
+      });
+    }
+  };
+
+  const handleConfirmReactivate = async () => {
+    if (!delegationToReactivate) return;
+    
+    setIsSubmitting(true);
+    await updateDelegation(delegationToReactivate.id, {
+      is_active: true,
+      starts_at: reactivateStartsAt ? new Date(reactivateStartsAt) : null,
+      ends_at: reactivateEndsAt ? new Date(reactivateEndsAt) : null,
     });
+    
+    setReactivateDialogOpen(false);
+    setDelegationToReactivate(null);
+    setReactivateStartsAt('');
+    setReactivateEndsAt('');
+    setIsSubmitting(false);
   };
 
   const handleDelete = async (delegationId: string) => {
@@ -180,6 +216,60 @@ export function DelegationManager() {
                   disabled={!selectedUserId || isSubmitting}
                 >
                   {isSubmitting ? 'Adding...' : 'Add Delegate'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Reactivate Delegate Dialog */}
+          <Dialog open={reactivateDialogOpen} onOpenChange={setReactivateDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Reactivate Delegate</DialogTitle>
+                <DialogDescription>
+                  Set the delegation period for {delegationToReactivate?.delegate?.full_name}
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="space-y-4 py-4">
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    Set the start and end dates for when this delegate can approve POs on your behalf.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="reactivate-starts-at">Start Date (Optional)</Label>
+                    <Input
+                      id="reactivate-starts-at"
+                      type="datetime-local"
+                      value={reactivateStartsAt}
+                      onChange={(e) => setReactivateStartsAt(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reactivate-ends-at">End Date (Optional)</Label>
+                    <Input
+                      id="reactivate-ends-at"
+                      type="datetime-local"
+                      value={reactivateEndsAt}
+                      onChange={(e) => setReactivateEndsAt(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave dates empty for delegation to be active immediately with no expiration.
+                </p>
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setReactivateDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleConfirmReactivate} disabled={isSubmitting}>
+                  {isSubmitting ? 'Reactivating...' : 'Reactivate Delegate'}
                 </Button>
               </DialogFooter>
             </DialogContent>
