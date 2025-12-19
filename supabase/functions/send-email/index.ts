@@ -10,7 +10,7 @@ const corsHeaders = {
 };
 
 interface EmailRequest {
-  type: 'po_approval_request' | 'po_pm_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'invoice_rejected' | 'user_invitation' | 'delegation_assigned';
+  type: 'po_approval_request' | 'po_pm_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'invoice_rejected' | 'invoice_paid' | 'user_invitation' | 'delegation_assigned';
   po_id?: string;
   invoice_id?: string;
   invitation_id?: string;
@@ -1286,6 +1286,109 @@ const formatDate = (date: string) => {
                   <p style="margin: 10px 0 0 0; color: #333;">
                     ${rejectionReason}
                   </p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                  <a href="${appUrl}/invoice/${invoice.id}" 
+                     style="display: inline-block; background: #6B4190; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; font-weight: bold;">
+                    View Invoice Details
+                  </a>
+                </div>
+              </div>
+              
+              <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                <p>CRT Property Investments Ltd<br>
+                1 Waterside Park, Valley Way, Wombwell, Barnsley, S73 0BB</p>
+              </div>
+            </div>
+          `,
+        });
+        break;
+
+      case 'invoice_paid':
+        if (!invoice) throw new Error('Invoice ID required for invoice_paid');
+        
+        // Get payment details from the invoice
+        const paymentDate = invoice.payment_date ? formatDate(invoice.payment_date) : formatDate(new Date().toISOString());
+        const paymentRef = invoice.payment_reference || 'Not specified';
+        
+        // Build recipients list: PM (PO creator) + all ADMIN users
+        const paidNotificationRecipients: string[] = [];
+        
+        // Add PM (the person who created the PO)
+        if (invoice.purchase_order?.created_by?.email) {
+          paidNotificationRecipients.push(invoice.purchase_order.created_by.email);
+        }
+        
+        // Get ADMIN users from the organisation
+        const { data: paidAdminUsers } = await supabase
+          .from('users')
+          .select('email')
+          .eq('organisation_id', invoice.organisation_id)
+          .eq('role', 'ADMIN')
+          .eq('is_active', true);
+        
+        // Add all ADMIN users (excluding those already added)
+        (paidAdminUsers || []).filter((u: { email: string }) => u.email && !paidNotificationRecipients.includes(u.email))
+          .forEach((u: { email: string }) => paidNotificationRecipients.push(u.email));
+        
+        if (paidNotificationRecipients.length === 0) {
+          console.log('No recipients found for invoice_paid notification, using fallback');
+          paidNotificationRecipients.push(accountsEmail);
+        }
+        
+        console.log(`Sending invoice_paid to ${paidNotificationRecipients.length} recipient(s):`, paidNotificationRecipients);
+        
+        emailResult = await resend.emails.send({
+          from: formatFromEmail(accountsEmail, 'CRT Property Accounts'),
+          to: paidNotificationRecipients,
+          subject: `Invoice Paid: ${invoice.invoice_number} - ${formatCurrency(Number(invoice.amount_inc_vat))}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 30px; text-align: center;">
+                <h1 style="margin: 0;">✓ Payment Complete</h1>
+              </div>
+              
+              <div style="padding: 30px; background: #f9fafb;">
+                <p style="font-size: 16px; color: #333;">
+                  An invoice has been marked as paid:
+                </p>
+                
+                <div style="background: white; border-left: 4px solid #059669; padding: 20px; margin: 20px 0;">
+                  <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Invoice Number:</strong></td>
+                      <td style="padding: 8px 0; text-align: right; font-family: monospace; font-weight: bold;">${invoice.invoice_number}</td>
+                    </tr>
+                    ${invoice.purchase_order ? `
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>PO Number:</strong></td>
+                      <td style="padding: 8px 0; text-align: right; font-family: monospace;">${invoice.purchase_order.po_number}</td>
+                    </tr>
+                    ` : ''}
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Contractor:</strong></td>
+                      <td style="padding: 8px 0; text-align: right;">${invoice.contractor?.name || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Amount Paid:</strong></td>
+                      <td style="padding: 8px 0; text-align: right; font-size: 18px; color: #059669; font-weight: bold;">${formatCurrency(Number(invoice.amount_inc_vat))}</td>
+                    </tr>
+                  </table>
+                </div>
+                
+                <div style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                  <p style="margin: 0; color: #059669; font-weight: bold;">Payment Details:</p>
+                  <table style="width: 100%; margin-top: 10px;">
+                    <tr>
+                      <td style="padding: 4px 0; color: #666;">Payment Date:</td>
+                      <td style="padding: 4px 0; text-align: right;">${paymentDate}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 4px 0; color: #666;">Reference:</td>
+                      <td style="padding: 4px 0; text-align: right;">${paymentRef}</td>
+                    </tr>
+                  </table>
                 </div>
                 
                 <div style="text-align: center; margin-top: 30px;">
