@@ -75,7 +75,8 @@ export default function PODetail() {
       .from('po_approval_logs')
       .select(`
         *,
-        action_by:users!action_by_user_id(*)
+        action_by:users!action_by_user_id(*),
+        approved_on_behalf_of:users!approved_on_behalf_of_user_id(*)
       `)
       .eq('po_id', id!)
       .order('created_at', { ascending: false });
@@ -759,7 +760,11 @@ export default function PODetail() {
                         {log.action.replace(/_/g, ' ')}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        by {log.action_by?.full_name} on {formatDateTime(log.created_at)}
+                        by {log.action_by?.full_name}
+                        {log.approved_on_behalf_of && (
+                          <> on behalf of {log.approved_on_behalf_of.full_name}</>
+                        )}
+                        {' '}on {formatDateTime(log.created_at)}
                       </p>
                       {log.comment && (
                         <p className="text-sm mt-2 p-2 bg-muted rounded">{log.comment}</p>

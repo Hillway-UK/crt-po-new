@@ -158,10 +158,12 @@ export interface POApprovalLog {
   id: string;
   po_id: string;
   action_by_user_id: string;
+  approved_on_behalf_of_user_id?: string;
   action: ApprovalAction;
   comment?: string;
   created_at: string;
   action_by?: User;
+  approved_on_behalf_of?: User;
 }
 
 export interface InvoiceApprovalLog {
