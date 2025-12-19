@@ -26,7 +26,7 @@ const purchaseOrderSchema = z.object({
   description: z.string().min(10, 'Description must be at least 10 characters').max(1000),
   amount_ex_vat: z.number().positive('Amount must be greater than 0'),
   vat_rate: z.number().min(0).max(100),
-  notes: z.string().max(1000).optional(),
+  notes: z.string().max(1000).optional().nullable(),
 });
 
 export default function EditPO() {
