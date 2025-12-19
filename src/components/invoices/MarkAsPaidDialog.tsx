@@ -56,6 +56,60 @@ export function MarkAsPaidDialog({ invoice, open, onOpenChange }: MarkAsPaidDial
 
       if (logError) throw logError;
 
+      // Send email notification (non-blocking)
+      supabase.functions.invoke('send-email', {
+        body: {
+          type: 'invoice_paid',
+          invoice_id: invoice.id,
+        },
+      }).catch((err) => {
+        console.error('Email notification for invoice paid failed:', err);
+      });
+
+      // Create in-app notifications for PM (PO creator) and ADMIN users
+      if (invoice.po_id) {
+        const { data: poData } = await supabase
+          .from('purchase_orders')
+          .select('created_by_user_id')
+          .eq('id', invoice.po_id)
+          .single();
+
+        // Get ADMIN users in the organisation
+        const { data: adminUsers } = await supabase
+          .from('users')
+          .select('id')
+          .eq('organisation_id', user.organisation_id)
+          .eq('role', 'ADMIN')
+          .eq('is_active', true)
+          .neq('id', user.id);
+
+        // Build notification recipients (PM + ADMINs, excluding self)
+        const notificationUserIds = new Set<string>();
+
+        // Add PM if exists and not the current user
+        if (poData?.created_by_user_id && poData.created_by_user_id !== user.id) {
+          notificationUserIds.add(poData.created_by_user_id);
+        }
+
+        // Add ADMIN users
+        adminUsers?.forEach(admin => notificationUserIds.add(admin.id));
+
+        // Create in-app notifications
+        if (notificationUserIds.size > 0) {
+          await supabase.from('notifications').insert(
+            Array.from(notificationUserIds).map((userId) => ({
+              user_id: userId,
+              organisation_id: user.organisation_id,
+              type: 'invoice_paid',
+              title: 'Invoice marked as paid',
+              message: `Invoice ${invoice.invoice_number} has been paid - ${formatCurrency(invoice.amount_inc_vat || 0)}`,
+              link: `/invoice/${invoice.id}`,
+              related_invoice_id: invoice.id,
+            }))
+          );
+        }
+      }
+
       toast({
         title: 'Invoice marked as paid',
         description: 'Invoice has been marked as paid',
