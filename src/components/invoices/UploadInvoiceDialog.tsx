@@ -131,6 +131,10 @@ export function UploadInvoiceDialog({ open, onOpenChange }: UploadInvoiceDialogP
       if (uploadError) throw uploadError;
 
       // Insert invoice record
+      const amountExVat = Number(formData.amountExVat);
+      const vatRate = Number(formData.vatRate);
+      const amountIncVat = amountExVat * (1 + vatRate / 100);
+
       const { data: invoice, error: insertError } = await supabase
         .from('invoices')
         .insert({
@@ -139,8 +143,9 @@ export function UploadInvoiceDialog({ open, onOpenChange }: UploadInvoiceDialogP
           organisation_id: user.organisation_id,
           invoice_number: formData.invoiceNumber,
           invoice_date: formData.invoiceDate,
-          amount_ex_vat: Number(formData.amountExVat),
-          vat_rate: Number(formData.vatRate),
+          amount_ex_vat: amountExVat,
+          amount_inc_vat: amountIncVat,
+          vat_rate: vatRate,
           status: hasMismatch ? 'UPLOADED' : 'MATCHED',
           mismatch_notes: hasMismatch ? formData.mismatchNotes : null,
           file_url: filePath,
