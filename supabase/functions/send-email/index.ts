@@ -238,10 +238,16 @@ const formatDate = (date: string) => {
         return storagePath;
       }
       
+      // Extract filename from storage path for download
+      const filename = storagePath.split('/').pop() || 'purchase-order.pdf';
+      
       // Generate a signed URL that expires in 7 days (for email recipients)
+      // The download option forces browser to download instead of opening
       const { data, error } = await supabase.storage
         .from('po-documents')
-        .createSignedUrl(storagePath, 60 * 60 * 24 * 7); // 7 days
+        .createSignedUrl(storagePath, 60 * 60 * 24 * 7, { 
+          download: filename 
+        });
       
       if (error) {
         console.error('Failed to generate signed URL:', error);
