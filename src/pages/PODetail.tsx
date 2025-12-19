@@ -547,9 +547,10 @@ export default function PODetail() {
   }
 
   const canEdit = (po.status === 'DRAFT' || po.status === 'REJECTED') && po.created_by_user_id === user?.id;
+  const userIsDelegate = isActiveDelegate(user?.id || '');
   const canApprove = 
     (po.status === 'PENDING_PM_APPROVAL' && (user?.role === 'PROPERTY_MANAGER' || user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN')) ||
-    (po.status === 'PENDING_MD_APPROVAL' && (user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN')) ||
+    (po.status === 'PENDING_MD_APPROVAL' && (user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN' || userIsDelegate)) ||
     (po.status === 'PENDING_CEO_APPROVAL' && (user?.role === 'CEO' || user?.role === 'ADMIN'));
 
   return (
