@@ -221,12 +221,35 @@ serve(async (req) => {
       }).format(amount);
     };
 
-    const formatDate = (date: string) => {
+const formatDate = (date: string) => {
       return new Date(date).toLocaleDateString('en-GB', {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
       });
+    };
+
+    // Helper to generate signed URL from storage path
+    const getSignedPdfUrl = async (storagePath: string | null): Promise<string | null> => {
+      if (!storagePath) return null;
+      
+      // If it's already a full URL, return as-is (backward compatibility)
+      if (storagePath.startsWith('http')) {
+        return storagePath;
+      }
+      
+      // Generate a signed URL that expires in 7 days (for email recipients)
+      const { data, error } = await supabase.storage
+        .from('po-documents')
+        .createSignedUrl(storagePath, 60 * 60 * 24 * 7); // 7 days
+      
+      if (error) {
+        console.error('Failed to generate signed URL:', error);
+        return null;
+      }
+      
+      console.log('Generated signed URL for:', storagePath);
+      return data.signedUrl;
     };
 
     let emailResult;
@@ -511,15 +534,18 @@ serve(async (req) => {
         break;
 
       case 'po_approved_contractor':
-        // Get PDF URL or generate if not exists
-        let pdfUrl = po.pdf_url;
-        if (!pdfUrl) {
+        // Get PDF storage path or generate if not exists
+        let pdfPath = po.pdf_url;
+        if (!pdfPath) {
           // Trigger PDF generation
           const pdfResponse = await supabase.functions.invoke('generate-po-pdf', {
             body: { po_id: po.id }
           });
-          pdfUrl = pdfResponse.data?.pdf_url;
+          pdfPath = pdfResponse.data?.pdf_url;
         }
+        
+        // Generate signed URL from storage path
+        const pdfUrl = await getSignedPdfUrl(pdfPath);
 
         emailResult = await resend.emails.send({
           from: formatFromEmail(contractorEmail, 'CRT Property'),
@@ -596,14 +622,17 @@ serve(async (req) => {
         break;
 
       case 'po_approved_accounts':
-        // Get PDF URL or generate if not exists
-        let accountsPdfUrl = po.pdf_url;
-        if (!accountsPdfUrl) {
+        // Get PDF storage path or generate if not exists
+        let accountsPdfPath = po.pdf_url;
+        if (!accountsPdfPath) {
           const pdfResponse = await supabase.functions.invoke('generate-po-pdf', {
             body: { po_id: po.id }
           });
-          accountsPdfUrl = pdfResponse.data?.pdf_url;
+          accountsPdfPath = pdfResponse.data?.pdf_url;
         }
+        
+        // Generate signed URL from storage path
+        const accountsPdfUrl = await getSignedPdfUrl(accountsPdfPath);
 
         // Send to all ACCOUNTS/ADMIN users
         const accountsRecipients = accountsAdminUsers.length > 0 
