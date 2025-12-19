@@ -10,7 +10,7 @@ const corsHeaders = {
 };
 
 interface EmailRequest {
-  type: 'po_approval_request' | 'po_pm_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'user_invitation' | 'delegation_assigned';
+  type: 'po_approval_request' | 'po_pm_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'invoice_rejected' | 'user_invitation' | 'delegation_assigned';
   po_id?: string;
   invoice_id?: string;
   invitation_id?: string;
@@ -1200,6 +1200,100 @@ const formatDate = (date: string) => {
                   Best regards,<br>
                   <strong>CRT Property Investments Ltd</strong>
                 </p>
+              </div>
+              
+              <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                <p>CRT Property Investments Ltd<br>
+                1 Waterside Park, Valley Way, Wombwell, Barnsley, S73 0BB</p>
+              </div>
+            </div>
+          `,
+        });
+        break;
+
+      case 'invoice_rejected':
+        if (!invoice) throw new Error('Invoice ID required for invoice_rejected');
+        
+        // Get rejection details from the latest approval log
+        const { data: rejectionLog } = await supabase
+          .from('invoice_approval_logs')
+          .select('*, action_by:users!action_by_user_id(*)')
+          .eq('invoice_id', invoice.id)
+          .eq('action', 'REJECTED')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        
+        const rejectorName = rejectionLog?.action_by?.full_name || 'An MD';
+        const rejectionReason = invoice.rejection_reason || rejectionLog?.comment || 'No reason provided';
+        
+        // Send to all ACCOUNTS/ADMIN users + the invoice uploader
+        const rejectionRecipients = accountsAdminUsers.length > 0 
+          ? accountsAdminUsers.map(u => u.email) 
+          : [accountsEmail];
+        
+        // Also notify the uploader if not already in the recipient list
+        if (invoice.uploaded_by?.email && !rejectionRecipients.includes(invoice.uploaded_by.email)) {
+          rejectionRecipients.push(invoice.uploaded_by.email);
+        }
+        
+        console.log(`Sending invoice_rejected to ${rejectionRecipients.length} recipient(s):`, rejectionRecipients);
+        
+        emailResult = await resend.emails.send({
+          from: formatFromEmail(mdEmail, 'CRT Property Approvals'),
+          to: rejectionRecipients,
+          subject: `Invoice Rejected: ${invoice.invoice_number}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: #dc2626; color: white; padding: 30px; text-align: center;">
+                <h1 style="margin: 0;">✗ Invoice Rejected</h1>
+              </div>
+              
+              <div style="padding: 30px; background: #f9fafb;">
+                <p style="font-size: 16px; color: #333;">
+                  An invoice has been rejected and requires attention:
+                </p>
+                
+                <div style="background: white; border-left: 4px solid #dc2626; padding: 20px; margin: 20px 0;">
+                  <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Invoice Number:</strong></td>
+                      <td style="padding: 8px 0; text-align: right; font-family: monospace; font-weight: bold;">${invoice.invoice_number}</td>
+                    </tr>
+                    ${invoice.purchase_order ? `
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>PO Number:</strong></td>
+                      <td style="padding: 8px 0; text-align: right; font-family: monospace;">${invoice.purchase_order.po_number}</td>
+                    </tr>
+                    ` : ''}
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Contractor:</strong></td>
+                      <td style="padding: 8px 0; text-align: right;">${invoice.contractor?.name || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Amount (inc VAT):</strong></td>
+                      <td style="padding: 8px 0; text-align: right; font-size: 18px; color: #dc2626; font-weight: bold;">${formatCurrency(Number(invoice.amount_inc_vat))}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; color: #666;"><strong>Rejected by:</strong></td>
+                      <td style="padding: 8px 0; text-align: right;">${rejectorName}</td>
+                    </tr>
+                  </table>
+                </div>
+                
+                <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                  <p style="margin: 0; color: #dc2626; font-weight: bold;">Rejection Reason:</p>
+                  <p style="margin: 10px 0 0 0; color: #333;">
+                    ${rejectionReason}
+                  </p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                  <a href="${appUrl}/invoice/${invoice.id}" 
+                     style="display: inline-block; background: #6B4190; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; font-weight: bold;">
+                    View Invoice Details
+                  </a>
+                </div>
               </div>
               
               <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
