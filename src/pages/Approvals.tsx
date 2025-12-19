@@ -483,10 +483,11 @@ export default function Approvals() {
                         </div>
 
                         {(() => {
-                          // Check if current user can approve this PO
+                          // Check if current user can approve this PO (including delegates for MD approval)
+                          const userIsDelegate = isActiveDelegate(user?.id || '');
                           const canUserApprove = isCeoApproval 
                             ? (user?.role === 'CEO' || user?.role === 'ADMIN')
-                            : (user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN');
+                            : (user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN' || userIsDelegate);
 
                           return (
                             <div className="flex gap-2 pt-2">
