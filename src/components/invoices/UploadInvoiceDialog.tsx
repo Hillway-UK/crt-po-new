@@ -123,15 +123,12 @@ export function UploadInvoiceDialog({ open, onOpenChange }: UploadInvoiceDialogP
     try {
       // Upload PDF to storage
       const fileName = `${Date.now()}_${file.name}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const filePath = `invoices/${fileName}`;
+      const { error: uploadError } = await supabase.storage
         .from('po-documents')
-        .upload(`invoices/${fileName}`, file);
+        .upload(filePath, file);
 
       if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('po-documents')
-        .getPublicUrl(`invoices/${fileName}`);
 
       // Insert invoice record
       const { data: invoice, error: insertError } = await supabase
@@ -146,7 +143,7 @@ export function UploadInvoiceDialog({ open, onOpenChange }: UploadInvoiceDialogP
           vat_rate: Number(formData.vatRate),
           status: hasMismatch ? 'UPLOADED' : 'MATCHED',
           mismatch_notes: hasMismatch ? formData.mismatchNotes : null,
-          file_url: publicUrl,
+          file_url: filePath,
           original_filename: file.name,
           uploaded_by_user_id: user.id,
         })

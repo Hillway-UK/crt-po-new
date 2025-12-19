@@ -15,6 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useApprovalWorkflow } from '@/hooks/useApprovalWorkflow';
 import { useDelegation } from '@/hooks/useDelegation';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters';
+import { downloadStorageFile } from '@/lib/storage';
 import { toast } from 'sonner';
 import { CheckCircle, XCircle, Edit, Trash2, Send, FileText, AlertTriangle, Download, Mail, Eye } from 'lucide-react';
 import { ApproveDialog } from '@/components/po/ApproveDialog';
@@ -699,11 +700,17 @@ export default function PODetail() {
                     <Eye className="mr-2 h-4 w-4" />
                     View PDF
                   </Button>
-                  <Button variant="outline" asChild>
-                    <a href={po.pdf_url} download>
-                      <Download className="mr-2 h-4 w-4" />
-                      Download PDF
-                    </a>
+                  <Button variant="outline" onClick={async () => {
+                    try {
+                      await downloadStorageFile(po.pdf_url!, `${po.po_number}.pdf`);
+                      toast.success('PDF downloaded successfully');
+                    } catch (error) {
+                      console.error('Download failed:', error);
+                      toast.error('Failed to download PDF');
+                    }
+                  }}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download PDF
                   </Button>
                 </>
               ) : (
