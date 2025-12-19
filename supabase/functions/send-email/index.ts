@@ -10,7 +10,7 @@ const corsHeaders = {
 };
 
 interface EmailRequest {
-  type: 'po_approval_request' | 'po_pm_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'invoice_rejected' | 'invoice_paid' | 'user_invitation' | 'delegation_assigned';
+  type: 'po_approval_request' | 'po_pm_approval_request' | 'po_approved_contractor' | 'po_approved_accounts' | 'po_approved_pm' | 'po_rejected' | 'po_ceo_approval_request' | 'invoice_needs_approval' | 'invoice_approved_accounts' | 'invoice_approved_pm' | 'invoice_rejected' | 'invoice_paid' | 'user_invitation' | 'delegation_assigned' | 'delegation_reactivated' | 'delegation_expired';
   po_id?: string;
   invoice_id?: string;
   invitation_id?: string;
@@ -333,6 +333,153 @@ const formatDate = (date: string) => {
                     View Pending Approvals
                   </a>
                 </div>
+              </div>
+              
+              <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                <p>CRT Property Investments Ltd<br>
+                1 Waterside Park, Valley Way, Wombwell, Barnsley, S73 0BB</p>
+              </div>
+            </div>
+          `,
+        });
+        break;
+      }
+
+      case 'delegation_reactivated': {
+        if (!delegation_id) {
+          throw new Error('delegation_id is required for delegation_reactivated email');
+        }
+        
+        if (!delegation) {
+          console.error('Delegation not found for id:', delegation_id);
+          throw new Error('Delegation not found');
+        }
+        
+        const delegatorName = delegation.delegator?.full_name || 'An MD';
+        const delegateName = delegation.delegate?.full_name || 'Delegate';
+        const delegateEmail = delegation.delegate?.email;
+        
+        if (!delegateEmail) {
+          throw new Error('Delegate email not found');
+        }
+        
+        // Format date range info
+        let dateInfo = 'Your delegation is active immediately and indefinitely.';
+        if (delegation.starts_at && delegation.ends_at) {
+          dateInfo = `Your delegation is active from ${formatDate(delegation.starts_at)} until ${formatDate(delegation.ends_at)}.`;
+        } else if (delegation.starts_at) {
+          dateInfo = `Your delegation will be active from ${formatDate(delegation.starts_at)} onwards.`;
+        } else if (delegation.ends_at) {
+          dateInfo = `Your delegation is active immediately until ${formatDate(delegation.ends_at)}.`;
+        }
+        
+        console.log(`Sending delegation reactivation email to ${delegateEmail}`);
+        
+        emailResult = await resend.emails.send({
+          from: formatFromEmail(defaultNotificationEmail, 'CRT Property Approvals'),
+          to: [delegateEmail],
+          subject: `Your Approval Delegation has been Reactivated`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 30px; text-align: center;">
+                <h1 style="margin: 0;">Delegation Reactivated</h1>
+                <p style="margin: 10px 0 0 0; opacity: 0.9;">You can now approve POs again</p>
+              </div>
+              
+              <div style="padding: 30px; background: #f9fafb;">
+                <p style="font-size: 16px; color: #333;">
+                  Dear ${delegateName},
+                </p>
+                
+                <p style="color: #666; line-height: 1.6;">
+                  <strong>${delegatorName}</strong> has reactivated your approval delegation for Purchase Orders.
+                </p>
+                
+                <div style="background: white; border-left: 4px solid #059669; padding: 20px; margin: 20px 0;">
+                  <h3 style="margin: 0 0 15px 0; color: #059669;">What this means:</h3>
+                  <ul style="margin: 0; padding-left: 20px; color: #333; line-height: 1.8;">
+                    <li>You can now approve POs on behalf of ${delegatorName}</li>
+                    <li>You will receive approval request notifications</li>
+                    <li>Your approvals will be logged as "on behalf of ${delegatorName}"</li>
+                  </ul>
+                </div>
+                
+                <div style="background: #ecfdf5; padding: 15px; border-radius: 4px; margin-bottom: 20px; border: 1px solid #a7f3d0;">
+                  <p style="margin: 0; color: #047857;">
+                    ${dateInfo}
+                  </p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                  <a href="${appUrl}/approvals" 
+                     style="display: inline-block; background: #059669; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; font-weight: bold;">
+                    View Pending Approvals
+                  </a>
+                </div>
+              </div>
+              
+              <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                <p>CRT Property Investments Ltd<br>
+                1 Waterside Park, Valley Way, Wombwell, Barnsley, S73 0BB</p>
+              </div>
+            </div>
+          `,
+        });
+        break;
+      }
+
+      case 'delegation_expired': {
+        if (!delegation_id) {
+          throw new Error('delegation_id is required for delegation_expired email');
+        }
+        
+        if (!delegation) {
+          console.error('Delegation not found for id:', delegation_id);
+          throw new Error('Delegation not found');
+        }
+        
+        const delegatorName = delegation.delegator?.full_name || 'An MD';
+        const delegateName = delegation.delegate?.full_name || 'Delegate';
+        const delegateEmail = delegation.delegate?.email;
+        
+        if (!delegateEmail) {
+          throw new Error('Delegate email not found');
+        }
+        
+        console.log(`Sending delegation expired email to ${delegateEmail}`);
+        
+        emailResult = await resend.emails.send({
+          from: formatFromEmail(defaultNotificationEmail, 'CRT Property Approvals'),
+          to: [delegateEmail],
+          subject: `Your Approval Delegation has Expired`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); color: white; padding: 30px; text-align: center;">
+                <h1 style="margin: 0;">Delegation Expired</h1>
+                <p style="margin: 10px 0 0 0; opacity: 0.9;">Your delegation period has ended</p>
+              </div>
+              
+              <div style="padding: 30px; background: #f9fafb;">
+                <p style="font-size: 16px; color: #333;">
+                  Dear ${delegateName},
+                </p>
+                
+                <p style="color: #666; line-height: 1.6;">
+                  Your approval delegation for <strong>${delegatorName}</strong> has expired and is no longer active.
+                </p>
+                
+                <div style="background: white; border-left: 4px solid #6b7280; padding: 20px; margin: 20px 0;">
+                  <h3 style="margin: 0 0 15px 0; color: #6b7280;">What this means:</h3>
+                  <ul style="margin: 0; padding-left: 20px; color: #333; line-height: 1.8;">
+                    <li>You can no longer approve POs on behalf of ${delegatorName}</li>
+                    <li>You will no longer receive approval notifications for their POs</li>
+                    <li>Contact ${delegatorName} if you need to extend your delegation</li>
+                  </ul>
+                </div>
+                
+                <p style="color: #666; font-size: 14px;">
+                  If this delegation needs to be extended, please contact the MD to reactivate it.
+                </p>
               </div>
               
               <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">

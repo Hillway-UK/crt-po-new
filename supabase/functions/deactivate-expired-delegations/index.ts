@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
         const organisationId = (delegation.delegate as any)?.organisation_id;
         
         if (organisationId) {
+          // Send in-app notification
           const { error: notifyError } = await supabase.from('notifications').insert({
             user_id: delegation.delegate_user_id,
             organisation_id: organisationId,
@@ -75,6 +76,29 @@ Deno.serve(async (req) => {
             console.error(`Error sending notification to ${delegation.delegate_user_id}:`, notifyError);
           } else {
             console.log(`Sent expiry notification to delegate ${delegation.delegate_user_id}`);
+          }
+
+          // Send email notification
+          try {
+            const emailResponse = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${supabaseServiceKey}`,
+              },
+              body: JSON.stringify({
+                type: 'delegation_expired',
+                delegation_id: delegation.id,
+              }),
+            });
+            
+            if (!emailResponse.ok) {
+              console.error(`Failed to send expiry email for delegation ${delegation.id}`);
+            } else {
+              console.log(`Sent expiry email for delegation ${delegation.id}`);
+            }
+          } catch (emailError) {
+            console.error(`Error sending expiry email for delegation ${delegation.id}:`, emailError);
           }
         }
       }

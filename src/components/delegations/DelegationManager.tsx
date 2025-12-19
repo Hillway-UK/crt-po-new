@@ -59,7 +59,7 @@ export function DelegationManager() {
   }, [user?.organisation_id, user?.id]);
 
   const handleAddDelegate = async () => {
-    if (!selectedUserId) return;
+    if (!selectedUserId || !user?.organisation_id) return;
 
     setIsSubmitting(true);
     const success = await createDelegation(
@@ -69,6 +69,36 @@ export function DelegationManager() {
     );
 
     if (success) {
+      // Send email and in-app notification to the delegate
+      const selectedUser = availableUsers.find(u => u.id === selectedUserId);
+      
+      // Get the newly created delegation ID for the email
+      const { data: newDelegation } = await supabase
+        .from('approval_delegations')
+        .select('id')
+        .eq('delegator_user_id', user.id)
+        .eq('delegate_user_id', selectedUserId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (newDelegation) {
+        // Send email notification
+        supabase.functions.invoke('send-email', {
+          body: { type: 'delegation_assigned', delegation_id: newDelegation.id },
+        });
+
+        // Create in-app notification
+        await supabase.from('notifications').insert({
+          user_id: selectedUserId,
+          organisation_id: user.organisation_id,
+          title: 'You\'ve been assigned as a Delegate',
+          message: `${user.full_name} has assigned you to approve POs on their behalf.`,
+          type: 'delegation_assigned',
+          link: '/approvals',
+        });
+      }
+
       setAddDialogOpen(false);
       setSelectedUserId('');
       setStartsAt('');
@@ -99,13 +129,28 @@ export function DelegationManager() {
   };
 
   const handleConfirmReactivate = async () => {
-    if (!delegationToReactivate) return;
+    if (!delegationToReactivate || !user?.organisation_id) return;
     
     setIsSubmitting(true);
     await updateDelegation(delegationToReactivate.id, {
       is_active: true,
       starts_at: reactivateStartsAt ? new Date(reactivateStartsAt) : null,
       ends_at: reactivateEndsAt ? new Date(reactivateEndsAt) : null,
+    });
+
+    // Send email notification
+    supabase.functions.invoke('send-email', {
+      body: { type: 'delegation_reactivated', delegation_id: delegationToReactivate.id },
+    });
+
+    // Create in-app notification
+    await supabase.from('notifications').insert({
+      user_id: delegationToReactivate.delegate_user_id,
+      organisation_id: user.organisation_id,
+      title: 'Your Delegation has been Reactivated',
+      message: `${user.full_name} has reactivated your delegation to approve POs on their behalf.`,
+      type: 'delegation_reactivated',
+      link: '/approvals',
     });
     
     setReactivateDialogOpen(false);
