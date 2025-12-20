@@ -210,6 +210,7 @@ export type Database = {
         Row: {
           action: Database["public"]["Enums"]["invoice_action"]
           action_by_user_id: string | null
+          approved_on_behalf_of_user_id: string | null
           comment: string | null
           created_at: string | null
           id: string
@@ -218,6 +219,7 @@ export type Database = {
         Insert: {
           action: Database["public"]["Enums"]["invoice_action"]
           action_by_user_id?: string | null
+          approved_on_behalf_of_user_id?: string | null
           comment?: string | null
           created_at?: string | null
           id?: string
@@ -226,6 +228,7 @@ export type Database = {
         Update: {
           action?: Database["public"]["Enums"]["invoice_action"]
           action_by_user_id?: string | null
+          approved_on_behalf_of_user_id?: string | null
           comment?: string | null
           created_at?: string | null
           id?: string
@@ -235,6 +238,13 @@ export type Database = {
           {
             foreignKeyName: "invoice_approval_logs_action_by_user_id_fkey"
             columns: ["action_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_approval_logs_approved_on_behalf_of_user_id_fkey"
+            columns: ["approved_on_behalf_of_user_id"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
