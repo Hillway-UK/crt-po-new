@@ -30,6 +30,25 @@ export default function InvoiceDetail() {
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [downloadingPO, setDownloadingPO] = useState(false);
   const [viewingPO, setViewingPO] = useState(false);
+  const [viewingInvoice, setViewingInvoice] = useState(false);
+
+  const handleViewInvoicePdf = async () => {
+    if (!invoice?.file_url) return;
+    setViewingInvoice(true);
+    try {
+      const signedUrl = await getSignedUrl(invoice.file_url);
+      if (signedUrl) {
+        window.open(signedUrl, '_blank');
+      } else {
+        toast.error('Failed to get PDF URL');
+      }
+    } catch (error) {
+      console.error('View failed:', error);
+      toast.error('Failed to view invoice PDF');
+    } finally {
+      setViewingInvoice(false);
+    }
+  };
 
   const handleViewPOPdf = async () => {
     if (!invoice?.purchase_order?.pdf_url) return;
@@ -291,11 +310,13 @@ export default function InvoiceDetail() {
           <div className="flex gap-2">
             {invoice.file_url && (
               <>
-                <Button variant="outline" asChild>
-                  <a href={invoice.file_url} target="_blank" rel="noopener noreferrer">
-                    <FileText className="mr-2 h-4 w-4" />
-                    View PDF
-                  </a>
+                <Button 
+                  variant="outline" 
+                  onClick={handleViewInvoicePdf}
+                  disabled={viewingInvoice}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  {viewingInvoice ? 'Opening...' : 'View PDF'}
                 </Button>
                 <Button 
                   variant="outline" 
