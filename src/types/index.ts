@@ -170,10 +170,12 @@ export interface InvoiceApprovalLog {
   id: string;
   invoice_id: string;
   action_by_user_id: string;
+  approved_on_behalf_of_user_id?: string;
   action: InvoiceAction;
   comment?: string;
   created_at: string;
   action_by?: User;
+  approved_on_behalf_of?: User;
 }
 
 export interface Settings {

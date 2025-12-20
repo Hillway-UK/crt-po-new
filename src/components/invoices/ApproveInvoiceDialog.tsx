@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDelegation } from '@/hooks/useDelegation';
 import { toast } from '@/components/ui/use-toast';
 import {
   AlertDialog,
@@ -28,6 +29,7 @@ export function ApproveInvoiceDialog({
   onOpenChange,
 }: ApproveInvoiceDialogProps) {
   const { user } = useAuth();
+  const { isActiveDelegate, getMDsForDelegate } = useDelegation();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
 
@@ -37,6 +39,22 @@ export function ApproveInvoiceDialog({
     setLoading(true);
 
     try {
+      // Check if this is a delegated approval
+      const isMD = user.role === 'MD';
+      const userIsDelegate = isActiveDelegate(user.id);
+      const isDelegatedApproval = !isMD && userIsDelegate;
+      
+      let approvedOnBehalfOfUserId: string | null = null;
+      let approvedOnBehalfOfName: string | null = null;
+      
+      if (isDelegatedApproval) {
+        const mds = await getMDsForDelegate(user.id);
+        if (mds.length > 0) {
+          approvedOnBehalfOfUserId = mds[0].id;
+          approvedOnBehalfOfName = mds[0].full_name;
+        }
+      }
+
       // Update invoice status
       const { error: updateError } = await supabase
         .from('invoices')
@@ -48,11 +66,15 @@ export function ApproveInvoiceDialog({
 
       if (updateError) throw updateError;
 
-      // Create approval log
+      // Create approval log with on-behalf-of info
       const { error: logError } = await supabase.from('invoice_approval_logs').insert({
         invoice_id: invoice.id,
         action_by_user_id: user.id,
+        approved_on_behalf_of_user_id: approvedOnBehalfOfUserId,
         action: 'APPROVED',
+        comment: isDelegatedApproval && approvedOnBehalfOfName 
+          ? `Approved on behalf of ${approvedOnBehalfOfName}` 
+          : null,
       });
 
       if (logError) throw logError;
