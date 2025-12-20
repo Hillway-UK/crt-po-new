@@ -72,9 +72,6 @@ export function ApproveInvoiceDialog({
         action_by_user_id: user.id,
         approved_on_behalf_of_user_id: approvedOnBehalfOfUserId,
         action: 'APPROVED',
-        comment: isDelegatedApproval && approvedOnBehalfOfName 
-          ? `Approved on behalf of ${approvedOnBehalfOfName}` 
-          : null,
       });
 
       if (logError) throw logError;
