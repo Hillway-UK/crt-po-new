@@ -1316,7 +1316,7 @@ const formatDate = (date: string) => {
                     </tr>
                     <tr>
                       <td style="padding: 8px 0; color: #666;"><strong>Approved by:</strong></td>
-                      <td style="padding: 8px 0; text-align: right;">${invoice.approved_by.full_name}</td>
+                      <td style="padding: 8px 0; text-align: right;">${invoice.approved_by?.full_name || 'MD/Delegate'}</td>
                     </tr>
                   </table>
                 </div>
