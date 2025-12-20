@@ -1128,10 +1128,61 @@ const formatDate = (date: string) => {
         );
         const amountsMatch = poAmountMatch < 0.01;
 
-        // Get all MD/ADMIN recipients or fallback to configured mdEmail
-        const invoiceApprovalRecipients = mdAdminUsers.length > 0 
+        // Get all MD/ADMIN recipients
+        let invoiceApprovalRecipients = mdAdminUsers.length > 0 
           ? mdAdminUsers.map(u => u.email) 
           : [mdEmail];
+
+        // Get active delegates for MD users
+        const mdUserIds = mdAdminUsers.filter(u => true).map(u => {
+          // We need to fetch the MD users with their IDs
+          return null;
+        });
+        
+        // Fetch MD user IDs
+        const { data: mdUsersWithIds } = await supabase
+          .from('users')
+          .select('id, email')
+          .eq('organisation_id', invoice.organisation_id)
+          .eq('role', 'MD')
+          .eq('is_active', true);
+
+        if (mdUsersWithIds && mdUsersWithIds.length > 0) {
+          // Fetch active delegations for these MDs
+          const { data: activeDelegationsData } = await supabase
+            .from('approval_delegations')
+            .select('delegate_user_id, starts_at, ends_at')
+            .in('delegator_user_id', mdUsersWithIds.map(u => u.id))
+            .eq('scope', 'PO_APPROVAL')
+            .eq('is_active', true);
+
+          // Filter for currently active delegations (time-wise)
+          const nowDate = new Date();
+          const currentlyActiveDelegations = (activeDelegationsData || []).filter(d => {
+            const startsAt = d.starts_at ? new Date(d.starts_at) : null;
+            const endsAt = d.ends_at ? new Date(d.ends_at) : null;
+            return (!startsAt || nowDate >= startsAt) && (!endsAt || nowDate <= endsAt);
+          });
+
+          if (currentlyActiveDelegations.length > 0) {
+            // Get delegate emails
+            const { data: delegateUsers } = await supabase
+              .from('users')
+              .select('email')
+              .in('id', currentlyActiveDelegations.map(d => d.delegate_user_id))
+              .eq('is_active', true);
+
+            if (delegateUsers && delegateUsers.length > 0) {
+              // Add delegate emails to recipients (deduplicated)
+              const allEmails = [
+                ...invoiceApprovalRecipients,
+                ...delegateUsers.map(u => u.email)
+              ];
+              invoiceApprovalRecipients = [...new Set(allEmails)];
+              console.log(`Added ${delegateUsers.length} active delegate(s) to invoice approval email recipients`);
+            }
+          }
+        }
         
         console.log(`Sending invoice approval request to ${invoiceApprovalRecipients.length} recipient(s):`, invoiceApprovalRecipients);
 

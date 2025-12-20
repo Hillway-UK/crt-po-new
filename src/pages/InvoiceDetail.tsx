@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDelegation } from '@/hooks/useDelegation';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -86,9 +87,12 @@ export default function InvoiceDetail() {
     enabled: !!id,
   });
 
+  const { isActiveDelegate } = useDelegation();
+  
   const isMD = user?.role === 'MD';
   const isAccounts = user?.role === 'ACCOUNTS' || user?.role === 'ADMIN';
-  const canApprove = isMD && invoice?.status === 'PENDING_MD_APPROVAL';
+  const userIsActiveDelegate = user?.id ? isActiveDelegate(user.id) : false;
+  const canApprove = (isMD || userIsActiveDelegate) && invoice?.status === 'PENDING_MD_APPROVAL';
   const canMarkPaid = isAccounts && invoice?.status === 'APPROVED_FOR_PAYMENT';
   const canSendForApproval = isAccounts && invoice?.status === 'MATCHED';
 
@@ -164,7 +168,7 @@ export default function InvoiceDetail() {
         console.error('Email notification failed:', err);
       });
 
-      // Get MD and ADMIN users and create notifications (exclude self)
+      // Get MD and ADMIN users (exclude self)
       const { data: mdUsers, error: mdUsersError } = await supabase
         .from('users')
         .select('id')
@@ -177,10 +181,35 @@ export default function InvoiceDetail() {
         console.error('Error fetching MD/ADMIN users:', mdUsersError);
       }
 
-      if (mdUsers && mdUsers.length > 0) {
+      // Get active delegates for MD users
+      const { data: activeDelegations } = await supabase
+        .from('approval_delegations')
+        .select('delegate_user_id, starts_at, ends_at')
+        .in('delegator_user_id', (mdUsers || []).map(u => u.id))
+        .eq('scope', 'PO_APPROVAL')
+        .eq('is_active', true);
+
+      // Filter for currently active delegations
+      const now = new Date();
+      const activeDelegateIds = (activeDelegations || [])
+        .filter(d => {
+          const startsAt = d.starts_at ? new Date(d.starts_at) : null;
+          const endsAt = d.ends_at ? new Date(d.ends_at) : null;
+          return (!startsAt || now >= startsAt) && (!endsAt || now <= endsAt);
+        })
+        .map(d => d.delegate_user_id)
+        .filter(id => id !== user.id); // Exclude self
+
+      // Combine MD/ADMIN users with active delegates (deduplicated)
+      const allRecipientIds = [...new Set([
+        ...(mdUsers || []).map(u => u.id),
+        ...activeDelegateIds
+      ])];
+
+      if (allRecipientIds.length > 0) {
         const { error: notificationError } = await supabase.from('notifications').insert(
-          mdUsers.map((md) => ({
-            user_id: md.id,
+          allRecipientIds.map((recipientId) => ({
+            user_id: recipientId,
             organisation_id: user.organisation_id,
             type: 'invoice_pending_approval',
             title: 'Invoice needs approval',
