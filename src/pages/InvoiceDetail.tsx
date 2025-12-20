@@ -96,12 +96,31 @@ export default function InvoiceDetail() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('invoice_approval_logs')
-        .select('*, action_by:users(*)')
+        .select(`
+          *,
+          action_by:users!invoice_approval_logs_action_by_user_id_fkey(*)
+        `)
         .eq('invoice_id', id!)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data;
+      
+      // Fetch approved_on_behalf_of users separately (handles missing column gracefully)
+      const logsWithOnBehalfOf = await Promise.all(
+        (data || []).map(async (log: any) => {
+          if (log.approved_on_behalf_of_user_id) {
+            const { data: onBehalfUser } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', log.approved_on_behalf_of_user_id)
+              .single();
+            return { ...log, approved_on_behalf_of: onBehalfUser };
+          }
+          return log;
+        })
+      );
+      
+      return logsWithOnBehalfOf;
     },
     enabled: !!id,
   });
@@ -533,6 +552,9 @@ export default function InvoiceDetail() {
                     </div>
                     <p className="text-sm mt-1">
                       By {log.action_by?.full_name || 'Unknown User'}
+                      {log.approved_on_behalf_of && (
+                        <> on behalf of {log.approved_on_behalf_of.full_name}</>
+                      )}
                     </p>
                     {log.comment && <p className="text-sm text-muted-foreground mt-1">{log.comment}</p>}
                   </div>
