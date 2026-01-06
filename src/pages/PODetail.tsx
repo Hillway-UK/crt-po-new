@@ -26,6 +26,7 @@ export default function PODetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { approve, reject, isProcessing } = usePOApproval();
+  const { isActiveDelegate } = useDelegation();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [approvalLogs, setApprovalLogs] = useState<POApprovalLog[]>([]);
   const [loading, setLoading] = useState(true);

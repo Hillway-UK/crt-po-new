@@ -1,6 +1,8 @@
+import { useCallback } from 'react';
 import { useWorkflowSettings } from './useWorkflowSettings';
 import { useWorkflowCRUD } from './useWorkflowCRUD';
 import { useApprovalLogic } from './useApprovalLogic';
+import { UserRole, POStatus } from '@/types';
 
 /**
  * Convenience hook that combines all workflow management functionality.
@@ -15,6 +17,8 @@ export function useApprovalWorkflow() {
   const settingsHook = useWorkflowSettings();
   const crudHook = useWorkflowCRUD();
   const logicHook = useApprovalLogic();
+
+  const { getApplicableSteps } = logicHook;
 
   /**
    * Determine the initial PO status and first approver based on workflow
@@ -183,7 +187,6 @@ export function useApprovalWorkflow() {
    * Takes into account role AND delegation
    * 
    * @param userRole - The role of the user attempting to approve
-   * @param userId - The ID of the user attempting to approve
    * @param currentStatus - The current PO status
    * @param isDelegate - Whether the user is an active delegate for MD
    */
@@ -302,5 +305,13 @@ export function useApprovalWorkflow() {
 
     // Business Logic
     getApplicableSteps: logicHook.getApplicableSteps,
+    
+    // New functions
+    getInitialApprovalInfo,
+    getNextApprovalStep,
+    getRoleHierarchy,
+    canRoleApproveStep,
+    canUserApproveAtStatus,
+    getAutoCompletableSteps,
   };
 }

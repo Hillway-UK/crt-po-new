@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -8,56 +8,22 @@ import { toast } from 'sonner';
 import { Clock } from 'lucide-react';
 import { POApprovalsSection } from '@/components/approvals/POApprovalsSection';
 import { InvoiceApprovalsSection } from '@/components/approvals/InvoiceApprovalsSection';
-
-interface WorkflowSettings {
-  use_custom_workflows: boolean;
-  auto_approve_below_amount: number | null;
-  require_ceo_above_amount: number | null;
-}
+import { useAuth } from '@/contexts/AuthContext';
+import { useDelegation } from '@/hooks/useDelegation';
 
 export default function Approvals() {
-  const [pendingPOs, setPendingPOs] = useState<PurchaseOrder[]>([]);
+  const { user } = useAuth();
+  const { isActiveDelegate } = useDelegation();
+  const [allPendingPOs, setAllPendingPOs] = useState<PurchaseOrder[]>([]);
   const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchPendingPOs();
-    fetchPendingInvoices();
-    fetchWorkflowData();
-  }, [user?.organisation_id]);
-
-  const fetchWorkflowData = async () => {
-    if (!user?.organisation_id) return;
-
-    try {
-      // Fetch settings
-      const { data: settings } = await supabase
-        .from('settings')
-        .select('use_custom_workflows, auto_approve_below_amount, require_ceo_above_amount')
-        .eq('organisation_id', user.organisation_id)
-        .single();
-
-      if (settings) {
-        setWorkflowSettings({
-          use_custom_workflows: (settings as any).use_custom_workflows || false,
-          auto_approve_below_amount: (settings as any).auto_approve_below_amount ? Number((settings as any).auto_approve_below_amount) : null,
-          require_ceo_above_amount: (settings as any).require_ceo_above_amount ? Number((settings as any).require_ceo_above_amount) : null,
-        });
-      }
-
-      // Fetch workflows with steps
-      const { data: workflowData } = await (supabase as any)
-        .from('approval_workflows')
-        .select(`*, steps:approval_workflow_steps(*)`)
-        .eq('organisation_id', user.organisation_id);
-
-      if (workflowData) {
-        setWorkflows(workflowData);
-      }
-    } catch (error) {
-      console.error('Error fetching workflow data:', error);
+    if (user?.organisation_id) {
+      fetchPendingPOs();
+      fetchPendingInvoices();
     }
-  };
+  }, [user?.organisation_id]);
 
   const fetchPendingPOs = async () => {
     setLoading(true);
