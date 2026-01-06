@@ -3,14 +3,26 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApprovalWorkflow } from '@/hooks/useApprovalWorkflow';
 import { UserRole } from '@/types';
-import { AlertTriangle, Loader2, Workflow } from 'lucide-react';
+import { AlertTriangle, Loader2, Workflow, User, Shield, Crown } from 'lucide-react';
 import { WorkflowThresholdSettings } from '@/components/workflows/WorkflowThresholdSettings';
 import { WorkflowList } from '@/components/workflows/WorkflowList';
 import { WorkflowStepDialog } from '@/components/workflows/WorkflowStepDialog';
+
+const ROLE_OPTIONS = [
+  { value: 'PROPERTY_MANAGER', label: 'Property Manager', icon: <User className="h-4 w-4" /> },
+  { value: 'MD', label: 'Managing Director', icon: <Shield className="h-4 w-4" /> },
+  { value: 'CEO', label: 'CEO', icon: <Crown className="h-4 w-4" /> },
+];
 
 export default function WorkflowSettings() {
   const { user } = useAuth();
@@ -22,6 +34,7 @@ export default function WorkflowSettings() {
     createWorkflow,
     deleteWorkflow,
     addWorkflowStep,
+    updateWorkflowStep,
     deleteWorkflowStep,
     setDefaultWorkflow,
     getApplicableSteps,
@@ -29,6 +42,19 @@ export default function WorkflowSettings() {
 
   const [addStepDialogOpen, setAddStepDialogOpen] = useState(false);
   const [selectedWorkflowForStep, setSelectedWorkflowForStep] = useState<string | null>(null);
+  const [editStepDialogOpen, setEditStepDialogOpen] = useState(false);
+  const [editingStep, setEditingStep] = useState<{
+    id: string;
+    step_order: number;
+    approver_role: UserRole;
+    min_amount: number | null;
+    requires_previous_approval: boolean;
+  } | null>(null);
+  const [editStepValues, setEditStepValues] = useState({
+    approver_role: 'MD' as UserRole,
+    min_amount: '',
+    requires_previous_approval: true,
+  });
 
   const handleSaveThresholds = async (autoApprove: number | null, ceoThreshold: number | null) => {
     await updateWorkflowSettings({
@@ -94,6 +120,18 @@ export default function WorkflowSettings() {
 
     setEditStepDialogOpen(false);
     setEditingStep(null);
+  };
+
+  const handleDeleteWorkflow = async (workflowId: string): Promise<void> => {
+    await deleteWorkflow(workflowId);
+  };
+
+  const handleSetDefaultWorkflow = async (workflowId: string, workflowType: 'PO' | 'INVOICE'): Promise<void> => {
+    await setDefaultWorkflow(workflowId, workflowType);
+  };
+
+  const handleDeleteStep = async (stepId: string): Promise<void> => {
+    await deleteWorkflowStep(stepId);
   };
 
   const getRoleBadge = (role: UserRole) => {
@@ -181,10 +219,10 @@ export default function WorkflowSettings() {
           <WorkflowList
             workflows={workflows}
             onCreateWorkflow={handleCreateWorkflow}
-            onDeleteWorkflow={deleteWorkflow}
-            onSetDefaultWorkflow={setDefaultWorkflow}
+            onDeleteWorkflow={handleDeleteWorkflow}
+            onSetDefaultWorkflow={handleSetDefaultWorkflow}
             onAddStepClick={handleAddStepClick}
-            onDeleteStep={deleteWorkflowStep}
+            onDeleteStep={handleDeleteStep}
             getRoleBadge={getRoleBadge}
           />
         )}
