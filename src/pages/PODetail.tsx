@@ -6,9 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
 import { PurchaseOrder, POApprovalLog, POStatus } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -19,11 +16,13 @@ import { ApproveDialog } from '@/components/po/ApproveDialog';
 import { RejectDialog } from '@/components/po/RejectDialog';
 import { DeletePODialog } from '@/components/po/DeletePODialog';
 import { PDFViewerDialog } from '@/components/po/PDFViewerDialog';
+import { usePOApproval } from '@/hooks/usePOApproval';
 
 export default function PODetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { approve, reject, isProcessing } = usePOApproval();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [approvalLogs, setApprovalLogs] = useState<POApprovalLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,228 +78,23 @@ export default function PODetail() {
   };
 
   const handleApprove = async () => {
-    if (!po || !user) return;
+    if (!po) return;
 
-    setProcessing(true);
-    try {
-      // Get workflow settings to check CEO threshold
-      const { data: settings } = await supabase
-        .from('settings')
-        .select('use_custom_workflows, require_ceo_above_amount')
-        .eq('organisation_id', user.organisation_id)
-        .maybeSingle();
-
-      const ceoThreshold = settings?.require_ceo_above_amount || 15000;
-      const useCustomWorkflows = settings?.use_custom_workflows ?? false;
-      const poAmount = Number(po.amount_inc_vat);
-      
-      // Check if CEO approval is required (MD approving high-value PO)
-      const needsCeoApproval = useCustomWorkflows && 
-        po.status === 'PENDING_MD_APPROVAL' && 
-        poAmount > ceoThreshold && 
-        user.role !== 'CEO';
-
-      if (needsCeoApproval) {
-        // Route to CEO for final approval
-        const { error: updateError } = await supabase
-          .from('purchase_orders')
-          .update({ status: 'PENDING_CEO_APPROVAL' })
-          .eq('id', po.id);
-
-        if (updateError) throw updateError;
-
-        // Log MD approval action
-        await supabase.from('po_approval_logs').insert([{
-          po_id: po.id,
-          action_by_user_id: user.id,
-          action: 'APPROVED',
-          comment: 'MD approved - routed to CEO for final approval',
-        }]);
-
-        // Notify CEO users
-        const { data: ceoUsers } = await supabase
-          .from('users')
-          .select('id')
-          .eq('organisation_id', user.organisation_id)
-          .eq('role', 'CEO')
-          .eq('is_active', true);
-
-        if (ceoUsers && ceoUsers.length > 0) {
-          await supabase.from('notifications').insert(
-            ceoUsers.map((ceoUser) => ({
-              user_id: ceoUser.id,
-              organisation_id: user.organisation_id,
-              type: 'po_pending_ceo_approval',
-              title: 'High-Value PO Requires CEO Approval',
-              message: `PO ${po.po_number} (${formatCurrency(poAmount)}) requires your approval`,
-              link: `/pos/${po.id}`,
-              related_po_id: po.id,
-            }))
-          );
-        }
-
-        // Send email notification to CEO
-        supabase.functions.invoke('send-email', {
-          body: { type: 'po_ceo_approval_request', po_id: po.id }
-        }).catch(err => console.error('CEO email notification failed:', err));
-
-        toast.success('PO approved by MD - routed to CEO for final approval');
-        fetchPO();
-        fetchApprovalLogs();
-        return;
-      }
-
-      // Full approval
-      const { error: updateError } = await supabase
-        .from('purchase_orders')
-        .update({
-          status: 'APPROVED',
-          approved_by_user_id: user.id,
-          approval_date: new Date().toISOString(),
-        })
-        .eq('id', po.id);
-
-      if (updateError) throw updateError;
-
-      await supabase.from('po_approval_logs').insert([{
-        po_id: po.id,
-        action_by_user_id: user.id,
-        action: 'APPROVED',
-      }]);
-
-      // Generate PDF and send emails in background
-      Promise.all([
-        supabase.functions.invoke('generate-po-pdf', { body: { po_id: po.id } }),
-        supabase.functions.invoke('send-email', { 
-          body: { type: 'po_approved_contractor', po_id: po.id } 
-        }),
-        supabase.functions.invoke('send-email', { 
-          body: { type: 'po_approved_accounts', po_id: po.id } 
-        }),
-        supabase.functions.invoke('send-email', { 
-          body: { type: 'po_approved_pm', po_id: po.id } 
-        }),
-      ]).catch(err => {
-        console.error('Background tasks failed:', err);
-        toast.error('PO approved but PDF/email may have failed');
-      });
-
-      // Create notification for PM (if not approving their own PO)
-      if (po.created_by_user_id !== user.id) {
-        const { error: notificationError } = await supabase.from('notifications').insert({
-          user_id: po.created_by_user_id,
-          organisation_id: user.organisation_id,
-          type: 'po_approved',
-          title: 'PO Approved',
-          message: `Your Purchase Order ${po.po_number} has been approved`,
-          link: `/pos/${po.id}`,
-          related_po_id: po.id,
-        });
-
-        if (notificationError) {
-          console.error('Error creating notification:', notificationError);
-        }
-      }
-
-      // Notify Accounts/ADMIN users that a new PO is ready for invoice
-      const { data: accountsUsers, error: accountsQueryError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('organisation_id', user.organisation_id)
-        .in('role', ['ACCOUNTS', 'ADMIN'])
-        .eq('is_active', true)
-        .neq('id', user.id);
-
-      if (accountsQueryError) {
-        console.error('Error fetching ACCOUNTS/ADMIN users:', accountsQueryError);
-      }
-
-      if (accountsUsers && accountsUsers.length > 0) {
-        const { error: accountsNotificationError } = await supabase.from('notifications').insert(
-          accountsUsers.map((accountsUser) => ({
-            user_id: accountsUser.id,
-            organisation_id: user.organisation_id,
-            type: 'po_approved_for_invoice',
-            title: 'PO Ready for Invoice',
-            message: `PO ${po.po_number} approved. Ready for invoice matching.`,
-            link: `/invoices`,
-            related_po_id: po.id,
-          }))
-        );
-
-        if (accountsNotificationError) {
-          console.error('Error creating ACCOUNTS notifications:', accountsNotificationError);
-        }
-      } else {
-        console.log('No ACCOUNTS/ADMIN users found to notify, or query failed');
-      }
-
-      toast.success('Purchase order approved and sent to contractor');
+    await approve(po, () => {
       fetchPO();
       fetchApprovalLogs();
-    } catch (error) {
-      toast.error('Failed to approve purchase order');
-      console.error(error);
-    } finally {
-      setProcessing(false);
-    }
+      setApproveDialogOpen(false);
+    });
   };
 
   const handleReject = async (reason: string) => {
-    if (!po || !user) return;
+    if (!po) return;
 
-    setProcessing(true);
-    try {
-      const { error: updateError } = await supabase
-        .from('purchase_orders')
-        .update({
-          status: 'REJECTED',
-          rejection_reason: reason,
-        })
-        .eq('id', po.id);
-
-      if (updateError) throw updateError;
-
-      await supabase.from('po_approval_logs').insert([{
-        po_id: po.id,
-        action_by_user_id: user.id,
-        action: 'REJECTED',
-        comment: reason,
-      }]);
-
-      // Send rejection email in background
-      supabase.functions.invoke('send-email', { 
-        body: { type: 'po_rejected', po_id: po.id } 
-      }).catch(err => {
-        console.error('Email failed:', err);
-      });
-
-      // Create notification for PM (if not rejecting their own PO)
-      if (po.created_by_user_id !== user.id) {
-        const { error: notificationError } = await supabase.from('notifications').insert({
-          user_id: po.created_by_user_id,
-          organisation_id: user.organisation_id,
-          type: 'po_rejected',
-          title: 'PO Rejected',
-          message: `Your Purchase Order ${po.po_number} has been rejected`,
-          link: `/pos/${po.id}`,
-          related_po_id: po.id,
-        });
-
-        if (notificationError) {
-          console.error('Error creating notification:', notificationError);
-        }
-      }
-
-      toast.success('Purchase order rejected. PM has been notified.');
+    await reject(po, reason, () => {
       fetchPO();
       fetchApprovalLogs();
-    } catch (error) {
-      toast.error('Failed to reject purchase order');
-      console.error(error);
-    } finally {
-      setProcessing(false);
-    }
+      setRejectDialogOpen(false);
+    });
   };
 
   const handleDelete = async () => {
@@ -534,11 +328,11 @@ export default function PODetail() {
 
           {canApprove && (
             <>
-              <Button onClick={() => setApproveDialogOpen(true)} disabled={processing}>
+              <Button onClick={() => setApproveDialogOpen(true)} disabled={processing || isProcessing(po.id)}>
                 <CheckCircle className="mr-2 h-4 w-4" />
                 Approve
               </Button>
-              <Button variant="destructive" onClick={() => setRejectDialogOpen(true)} disabled={processing}>
+              <Button variant="destructive" onClick={() => setRejectDialogOpen(true)} disabled={processing || isProcessing(po.id)}>
                 <XCircle className="mr-2 h-4 w-4" />
                 Reject
               </Button>
