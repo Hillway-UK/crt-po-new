@@ -7,8 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "build:prod": "vite build --mode production",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy:dev": "vercel",
+    "deploy:prod": "vercel --prod"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
