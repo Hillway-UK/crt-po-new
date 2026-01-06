@@ -1,5 +1,5 @@
 export type UserRole = 'PROPERTY_MANAGER' | 'MD' | 'ACCOUNTS' | 'ADMIN' | 'CEO';
-export type POStatus = 'DRAFT' | 'PENDING_MD_APPROVAL' | 'PENDING_CEO_APPROVAL' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+export type POStatus = 'DRAFT' | 'PENDING_PM_APPROVAL' | 'PENDING_MD_APPROVAL' | 'PENDING_CEO_APPROVAL' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 export type InvoiceStatus = 'UPLOADED' | 'MATCHED' | 'PENDING_MD_APPROVAL' | 'APPROVED_FOR_PAYMENT' | 'PAID' | 'REJECTED';
 export type ApprovalAction = 'SENT_FOR_APPROVAL' | 'APPROVED' | 'REJECTED';
 export type InvoiceAction = 'UPLOADED' | 'MATCHED' | 'SENT_FOR_MD_APPROVAL' | 'APPROVED' | 'REJECTED' | 'MARKED_PAID';
@@ -27,6 +27,7 @@ export interface ApprovalWorkflowStep {
   max_amount?: number;
   is_required: boolean;
   skip_if_below_amount?: number;
+  requires_previous_approval?: boolean;
   created_at: string;
 }
 
@@ -157,20 +158,24 @@ export interface POApprovalLog {
   id: string;
   po_id: string;
   action_by_user_id: string;
+  approved_on_behalf_of_user_id?: string;
   action: ApprovalAction;
   comment?: string;
   created_at: string;
   action_by?: User;
+  approved_on_behalf_of?: User;
 }
 
 export interface InvoiceApprovalLog {
   id: string;
   invoice_id: string;
   action_by_user_id: string;
+  approved_on_behalf_of_user_id?: string;
   action: InvoiceAction;
   comment?: string;
   created_at: string;
   action_by?: User;
+  approved_on_behalf_of?: User;
 }
 
 export interface Settings {

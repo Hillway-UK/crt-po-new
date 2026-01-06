@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.generate-po-pdf]
 verify_jwt = false
+
+[functions.deactivate-expired-delegations]
+verify_jwt = false

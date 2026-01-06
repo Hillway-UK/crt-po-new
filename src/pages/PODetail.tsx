@@ -9,7 +9,10 @@ import { Separator } from '@/components/ui/separator';
 import { PurchaseOrder, POApprovalLog, POStatus } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useApprovalWorkflow } from '@/hooks/useApprovalWorkflow';
+import { useDelegation } from '@/hooks/useDelegation';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters';
+import { downloadStorageFile } from '@/lib/storage';
 import { toast } from 'sonner';
 import { CheckCircle, XCircle, Edit, Trash2, Send, FileText, AlertTriangle, Download, Mail, Eye } from 'lucide-react';
 import { ApproveDialog } from '@/components/po/ApproveDialog';
@@ -23,6 +26,7 @@ export default function PODetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { approve, reject, isProcessing } = usePOApproval();
+  const { isActiveDelegate } = useDelegation();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [approvalLogs, setApprovalLogs] = useState<POApprovalLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,7 +73,8 @@ export default function PODetail() {
       .from('po_approval_logs')
       .select(`
         *,
-        action_by:users!action_by_user_id(*)
+        action_by:users!action_by_user_id(*),
+        approved_on_behalf_of:users!approved_on_behalf_of_user_id(*)
       `)
       .eq('po_id', id!)
       .order('created_at', { ascending: false });
@@ -160,6 +165,7 @@ export default function PODetail() {
   const getStatusBadge = (status: POStatus) => {
     const variants: Record<POStatus, { label: string; className: string }> = {
       DRAFT: { label: 'Draft', className: 'bg-gray-100 text-gray-700 text-lg px-4 py-1' },
+      PENDING_PM_APPROVAL: { label: 'Pending PM Approval', className: 'bg-blue-100 text-blue-700 text-lg px-4 py-1' },
       PENDING_MD_APPROVAL: { label: 'Pending MD Approval', className: 'bg-amber-100 text-amber-700 text-lg px-4 py-1' },
       PENDING_CEO_APPROVAL: { label: 'Pending CEO Approval', className: 'bg-orange-100 text-orange-700 text-lg px-4 py-1' },
       APPROVED: { label: 'Approved', className: 'bg-green-100 text-green-700 text-lg px-4 py-1' },
@@ -195,8 +201,11 @@ export default function PODetail() {
   }
 
   const canEdit = (po.status === 'DRAFT' || po.status === 'REJECTED') && po.created_by_user_id === user?.id;
-  const canApprove = (po.status === 'PENDING_MD_APPROVAL' && (user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN')) ||
-                     (po.status === 'PENDING_CEO_APPROVAL' && (user?.role === 'CEO' || user?.role === 'ADMIN'));
+  const userIsDelegate = isActiveDelegate(user?.id || '');
+  const canApprove = 
+    (po.status === 'PENDING_PM_APPROVAL' && (user?.role === 'PROPERTY_MANAGER' || user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN')) ||
+    (po.status === 'PENDING_MD_APPROVAL' && (user?.role === 'MD' || user?.role === 'CEO' || user?.role === 'ADMIN' || userIsDelegate)) ||
+    (po.status === 'PENDING_CEO_APPROVAL' && (user?.role === 'CEO' || user?.role === 'ADMIN'));
 
   return (
     <MainLayout title={`Purchase Order ${po.po_number}`}>
@@ -347,11 +356,17 @@ export default function PODetail() {
                     <Eye className="mr-2 h-4 w-4" />
                     View PDF
                   </Button>
-                  <Button variant="outline" asChild>
-                    <a href={po.pdf_url} download>
-                      <Download className="mr-2 h-4 w-4" />
-                      Download PDF
-                    </a>
+                  <Button variant="outline" onClick={async () => {
+                    try {
+                      await downloadStorageFile(po.pdf_url!, `${po.po_number}.pdf`);
+                      toast.success('PDF downloaded successfully');
+                    } catch (error) {
+                      console.error('Download failed:', error);
+                      toast.error('Failed to download PDF');
+                    }
+                  }}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download PDF
                   </Button>
                 </>
               ) : (
@@ -400,7 +415,11 @@ export default function PODetail() {
                         {log.action.replace(/_/g, ' ')}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        by {log.action_by?.full_name} on {formatDateTime(log.created_at)}
+                        by {log.action_by?.full_name}
+                        {log.approved_on_behalf_of && (
+                          <> on behalf of {log.approved_on_behalf_of.full_name}</>
+                        )}
+                        {' '}on {formatDateTime(log.created_at)}
                       </p>
                       {log.comment && (
                         <p className="text-sm mt-2 p-2 bg-muted rounded">{log.comment}</p>

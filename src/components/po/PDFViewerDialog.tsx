@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Download, Printer, X, ExternalLink } from 'lucide-react';
+import { Download, Printer, ExternalLink } from 'lucide-react';
+import { getSignedUrl } from '@/lib/storage';
 
 interface PDFViewerDialogProps {
   open: boolean;
@@ -17,6 +18,7 @@ export function PDFViewerDialog({ open, onOpenChange, pdfUrl, title }: PDFViewer
 
   useEffect(() => {
     let currentBlobUrl: string | null = null;
+    let cancelled = false;
     
     if (!open || !pdfUrl) {
       setBlobUrl(null);
@@ -28,23 +30,39 @@ export function PDFViewerDialog({ open, onOpenChange, pdfUrl, title }: PDFViewer
     setLoading(true);
     setError(null);
 
-    fetch(pdfUrl)
-      .then(res => {
+    async function loadPdf() {
+      try {
+        // Get a signed URL first
+        const signedUrl = await getSignedUrl(pdfUrl);
+        if (cancelled) return;
+        
+        if (!signedUrl) {
+          throw new Error('Failed to get signed URL');
+        }
+
+        const res = await fetch(signedUrl);
+        if (cancelled) return;
+        
         if (!res.ok) throw new Error('Failed to fetch PDF');
-        return res.blob();
-      })
-      .then(blob => {
+        
+        const blob = await res.blob();
+        if (cancelled) return;
+        
         currentBlobUrl = URL.createObjectURL(blob);
         setBlobUrl(currentBlobUrl);
         setLoading(false);
-      })
-      .catch(err => {
+      } catch (err) {
+        if (cancelled) return;
         console.error('Error loading PDF:', err);
         setError('Failed to load PDF. Please try downloading it instead.');
         setLoading(false);
-      });
+      }
+    }
+
+    loadPdf();
 
     return () => {
+      cancelled = true;
       if (currentBlobUrl) {
         URL.revokeObjectURL(currentBlobUrl);
       }
@@ -68,6 +86,13 @@ export function PDFViewerDialog({ open, onOpenChange, pdfUrl, title }: PDFViewer
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+    }
+  };
+
+  const handleOpenInNewTab = async () => {
+    const signedUrl = await getSignedUrl(pdfUrl);
+    if (signedUrl) {
+      window.open(signedUrl, '_blank');
     }
   };
 
@@ -115,7 +140,7 @@ export function PDFViewerDialog({ open, onOpenChange, pdfUrl, title }: PDFViewer
                 <p className="text-sm text-destructive mb-4">{error}</p>
                 <Button
                   variant="outline"
-                  onClick={() => window.open(pdfUrl, '_blank')}
+                  onClick={handleOpenInNewTab}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Open in New Tab

@@ -67,6 +67,66 @@ export function RejectInvoiceDialog({
 
       if (logError) throw logError;
 
+      // Send email notification to ACCOUNTS/ADMIN + uploader (non-blocking)
+      supabase.functions.invoke('send-email', {
+        body: {
+          type: 'invoice_rejected',
+          invoice_id: invoice.id,
+        },
+      }).catch((err) => {
+        console.error('Email notification for invoice rejection failed:', err);
+      });
+
+      // Get ACCOUNTS/ADMIN users (exclude self)
+      const { data: accountsUsers, error: accountsUsersError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('organisation_id', user.organisation_id)
+        .in('role', ['ACCOUNTS', 'ADMIN'])
+        .eq('is_active', true)
+        .neq('id', user.id);
+
+      if (accountsUsersError) {
+        console.error('Error fetching Accounts/ADMIN users:', accountsUsersError);
+      }
+
+      // Create in-app notifications for ACCOUNTS/ADMIN users
+      if (accountsUsers && accountsUsers.length > 0) {
+        const { error: notificationError } = await supabase.from('notifications').insert(
+          accountsUsers.map((accountsUser) => ({
+            user_id: accountsUser.id,
+            organisation_id: user.organisation_id,
+            type: 'invoice_rejected',
+            title: 'Invoice rejected',
+            message: `Invoice ${invoice.invoice_number} has been rejected`,
+            link: `/invoice/${invoice.id}`,
+            related_invoice_id: invoice.id,
+          }))
+        );
+
+        if (notificationError) {
+          console.error('Error creating notifications for Accounts users:', notificationError);
+        }
+      }
+
+      // Create notification for uploader (if not same user and not already notified)
+      const uploaderAlreadyNotified = accountsUsers?.some(u => u.id === invoice.uploaded_by_user_id);
+      if (invoice.uploaded_by_user_id && invoice.uploaded_by_user_id !== user.id && !uploaderAlreadyNotified) {
+        const { error: notificationError } = await supabase.from('notifications').insert({
+          user_id: invoice.uploaded_by_user_id,
+          organisation_id: user.organisation_id,
+          type: 'invoice_rejected',
+          title: 'Invoice rejected',
+          message: `Invoice ${invoice.invoice_number} has been rejected: ${reason.trim().substring(0, 50)}${reason.trim().length > 50 ? '...' : ''}`,
+          link: `/invoice/${invoice.id}`,
+          related_invoice_id: invoice.id,
+        });
+
+        if (notificationError) {
+          console.error('Error creating notification for uploader:', notificationError);
+        }
+      }
+
       toast({
         title: 'Invoice rejected',
         description: 'Invoice has been rejected',
