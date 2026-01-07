@@ -1,73 +1,74 @@
-# Welcome to your Lovable project
+# CRT Property Approvals Hub
 
-## Project info
+Purchase Order and Invoice management system for CRT Property Investments Ltd.
 
-**URL**: https://lovable.dev/projects/14b79e2f-e822-45d3-a7ee-3ef0e025a531
+## Overview
 
-## How can I edit this code?
+This application streamlines the approval workflow for purchase orders and invoices, providing role-based access and automated notifications.
 
-There are several ways of editing your application.
+## Tech Stack
 
-**Use Lovable**
+- **Framework**: React 18 with TypeScript
+- **Build Tool**: Vite
+- **UI Components**: shadcn-ui with Radix UI
+- **Styling**: Tailwind CSS
+- **Backend**: Supabase (Database & Edge Functions)
+- **Deployment**: Vercel
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/14b79e2f-e822-45d3-a7ee-3ef0e025a531) and start prompting.
+## Development
 
-Changes made via Lovable will be committed automatically to this repo.
+### Prerequisites
 
-**Use your preferred IDE**
+- Node.js (v18 or higher)
+- npm
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+### Installation
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+# Install dependencies
+npm install
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Start development server
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The application will be available at `http://localhost:8080`
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Available Scripts
 
-**Use GitHub Codespaces**
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run build:dev` - Build for development environment
+- `npm run build:prod` - Build for production environment
+- `npm run preview` - Preview production build
+- `npm run lint` - Run ESLint
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Deployment
 
-## What technologies are used for this project?
+### Development Environment
 
-This project is built with:
+```sh
+npm run deploy:dev
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### Production Environment
 
-## How can I deploy this project?
+```sh
+npm run deploy:prod
+```
 
-Simply open [Lovable](https://lovable.dev/projects/14b79e2f-e822-45d3-a7ee-3ef0e025a531) and click on Share -> Publish.
+The application is configured for deployment to Vercel with separate development and production environments.
 
-## Can I connect a custom domain to my Lovable project?
+## Project Structure
 
-Yes, you can!
+- `/src` - Application source code
+  - `/components` - React components
+  - `/pages` - Page components
+  - `/hooks` - Custom React hooks
+  - `/lib` - Utility functions and configurations
+- `/supabase` - Supabase configuration and edge functions
+- `/public` - Static assets
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## License
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Copyright © 2025 CRT Property Investments Ltd. All rights reserved.
