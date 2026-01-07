@@ -207,7 +207,7 @@ serve(async (req) => {
     const mdEmail = settings?.notify_md_email || defaultNotificationEmail;
     const accountsEmail = settings?.notify_accounts_email || defaultNotificationEmail;
     const contractorEmail = settings?.contractor_email || defaultNotificationEmail;
-    const appUrl = (Deno.env.get('APP_URL') || 'https://crt-approvals.lovable.app').replace(/\/+$/, '');
+    const appUrl = (Deno.env.get('APP_URL') || 'https://crt-approvals.vercel.app').replace(/\/+$/, '');
 
     // Helper to format from address
     const formatFromEmail = (email: string, name: string = 'CRT Property') => {
