@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDelegation } from '@/hooks/useDelegation';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,7 +15,7 @@ import { InvoiceStatusBadge } from '@/components/invoices/InvoiceStatusBadge';
 import { ApproveInvoiceDialog } from '@/components/invoices/ApproveInvoiceDialog';
 import { RejectInvoiceDialog } from '@/components/invoices/RejectInvoiceDialog';
 import { MarkAsPaidDialog } from '@/components/invoices/MarkAsPaidDialog';
-import { downloadFile } from '@/lib/fileDownload';
+import { downloadStorageFile, getSignedUrl } from '@/lib/storage';
 import { toast } from 'sonner';
 import type { Invoice } from '@/types';
 
@@ -28,6 +29,44 @@ export default function InvoiceDetail() {
   const [sendingForApproval, setSendingForApproval] = useState(false);
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [downloadingPO, setDownloadingPO] = useState(false);
+  const [viewingPO, setViewingPO] = useState(false);
+  const [viewingInvoice, setViewingInvoice] = useState(false);
+
+  const handleViewInvoicePdf = async () => {
+    if (!invoice?.file_url) return;
+    setViewingInvoice(true);
+    try {
+      const signedUrl = await getSignedUrl(invoice.file_url);
+      if (signedUrl) {
+        window.open(signedUrl, '_blank');
+      } else {
+        toast.error('Failed to get PDF URL');
+      }
+    } catch (error) {
+      console.error('View failed:', error);
+      toast.error('Failed to view invoice PDF');
+    } finally {
+      setViewingInvoice(false);
+    }
+  };
+
+  const handleViewPOPdf = async () => {
+    if (!invoice?.purchase_order?.pdf_url) return;
+    setViewingPO(true);
+    try {
+      const signedUrl = await getSignedUrl(invoice.purchase_order.pdf_url);
+      if (signedUrl) {
+        window.open(signedUrl, '_blank');
+      } else {
+        toast.error('Failed to get PDF URL');
+      }
+    } catch (error) {
+      console.error('View failed:', error);
+      toast.error('Failed to view PO PDF');
+    } finally {
+      setViewingPO(false);
+    }
+  };
 
   const { data: invoice, isLoading } = useQuery({
     queryKey: ['invoice', id],
@@ -57,19 +96,41 @@ export default function InvoiceDetail() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('invoice_approval_logs')
-        .select('*, action_by:users(*)')
+        .select(`
+          *,
+          action_by:users!invoice_approval_logs_action_by_user_id_fkey(*)
+        `)
         .eq('invoice_id', id!)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data;
+      
+      // Fetch approved_on_behalf_of users separately (handles missing column gracefully)
+      const logsWithOnBehalfOf = await Promise.all(
+        (data || []).map(async (log: any) => {
+          if (log.approved_on_behalf_of_user_id) {
+            const { data: onBehalfUser } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', log.approved_on_behalf_of_user_id)
+              .single();
+            return { ...log, approved_on_behalf_of: onBehalfUser };
+          }
+          return log;
+        })
+      );
+      
+      return logsWithOnBehalfOf;
     },
     enabled: !!id,
   });
 
+  const { isActiveDelegate } = useDelegation();
+  
   const isMD = user?.role === 'MD';
   const isAccounts = user?.role === 'ACCOUNTS' || user?.role === 'ADMIN';
-  const canApprove = isMD && invoice?.status === 'PENDING_MD_APPROVAL';
+  const userIsActiveDelegate = user?.id ? isActiveDelegate(user.id) : false;
+  const canApprove = (isMD || userIsActiveDelegate) && invoice?.status === 'PENDING_MD_APPROVAL';
   const canMarkPaid = isAccounts && invoice?.status === 'APPROVED_FOR_PAYMENT';
   const canSendForApproval = isAccounts && invoice?.status === 'MATCHED';
 
@@ -83,7 +144,7 @@ export default function InvoiceDetail() {
         ? `${poNumber}_${invoice.invoice_number}.pdf`
         : `${invoice.invoice_number}.pdf`;
       
-      await downloadFile(invoice.file_url, filename);
+      await downloadStorageFile(invoice.file_url, filename);
       toast.success('Invoice downloaded successfully');
     } catch (error) {
       console.error('Download failed:', error);
@@ -99,7 +160,7 @@ export default function InvoiceDetail() {
     setDownloadingPO(true);
     try {
       const filename = `${invoice.purchase_order.po_number}.pdf`;
-      await downloadFile(invoice.purchase_order.pdf_url, filename);
+      await downloadStorageFile(invoice.purchase_order.pdf_url, filename);
       toast.success('PO downloaded successfully');
     } catch (error) {
       console.error('Download failed:', error);
@@ -145,7 +206,7 @@ export default function InvoiceDetail() {
         console.error('Email notification failed:', err);
       });
 
-      // Get MD and ADMIN users and create notifications (exclude self)
+      // Get MD and ADMIN users (exclude self)
       const { data: mdUsers, error: mdUsersError } = await supabase
         .from('users')
         .select('id')
@@ -158,10 +219,35 @@ export default function InvoiceDetail() {
         console.error('Error fetching MD/ADMIN users:', mdUsersError);
       }
 
-      if (mdUsers && mdUsers.length > 0) {
+      // Get active delegates for MD users
+      const { data: activeDelegations } = await supabase
+        .from('approval_delegations')
+        .select('delegate_user_id, starts_at, ends_at')
+        .in('delegator_user_id', (mdUsers || []).map(u => u.id))
+        .eq('scope', 'PO_APPROVAL')
+        .eq('is_active', true);
+
+      // Filter for currently active delegations
+      const now = new Date();
+      const activeDelegateIds = (activeDelegations || [])
+        .filter(d => {
+          const startsAt = d.starts_at ? new Date(d.starts_at) : null;
+          const endsAt = d.ends_at ? new Date(d.ends_at) : null;
+          return (!startsAt || now >= startsAt) && (!endsAt || now <= endsAt);
+        })
+        .map(d => d.delegate_user_id)
+        .filter(id => id !== user.id); // Exclude self
+
+      // Combine MD/ADMIN users with active delegates (deduplicated)
+      const allRecipientIds = [...new Set([
+        ...(mdUsers || []).map(u => u.id),
+        ...activeDelegateIds
+      ])];
+
+      if (allRecipientIds.length > 0) {
         const { error: notificationError } = await supabase.from('notifications').insert(
-          mdUsers.map((md) => ({
-            user_id: md.id,
+          allRecipientIds.map((recipientId) => ({
+            user_id: recipientId,
             organisation_id: user.organisation_id,
             type: 'invoice_pending_approval',
             title: 'Invoice needs approval',
@@ -243,11 +329,13 @@ export default function InvoiceDetail() {
           <div className="flex gap-2">
             {invoice.file_url && (
               <>
-                <Button variant="outline" asChild>
-                  <a href={invoice.file_url} target="_blank" rel="noopener noreferrer">
-                    <FileText className="mr-2 h-4 w-4" />
-                    View PDF
-                  </a>
+                <Button 
+                  variant="outline" 
+                  onClick={handleViewInvoicePdf}
+                  disabled={viewingInvoice}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  {viewingInvoice ? 'Opening...' : 'View PDF'}
                 </Button>
                 <Button 
                   variant="outline" 
@@ -349,11 +437,14 @@ export default function InvoiceDetail() {
                   </div>
                   {invoice.purchase_order.pdf_url && (
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={invoice.purchase_order.pdf_url} target="_blank" rel="noopener noreferrer">
-                          <FileText className="mr-2 h-4 w-4" />
-                          View PO PDF
-                        </a>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={handleViewPOPdf}
+                        disabled={viewingPO}
+                      >
+                        <FileText className="mr-2 h-4 w-4" />
+                        {viewingPO ? 'Opening...' : 'View PO PDF'}
                       </Button>
                       <Button 
                         variant="outline" 
@@ -461,6 +552,9 @@ export default function InvoiceDetail() {
                     </div>
                     <p className="text-sm mt-1">
                       By {log.action_by?.full_name || 'Unknown User'}
+                      {log.approved_on_behalf_of && (
+                        <> on behalf of {log.approved_on_behalf_of.full_name}</>
+                      )}
                     </p>
                     {log.comment && <p className="text-sm text-muted-foreground mt-1">{log.comment}</p>}
                   </div>

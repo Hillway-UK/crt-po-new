@@ -3,14 +3,26 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApprovalWorkflow } from '@/hooks/useApprovalWorkflow';
 import { UserRole } from '@/types';
-import { AlertTriangle, Loader2, Workflow } from 'lucide-react';
+import { AlertTriangle, Loader2, Workflow, User, Shield, Crown } from 'lucide-react';
 import { WorkflowThresholdSettings } from '@/components/workflows/WorkflowThresholdSettings';
 import { WorkflowList } from '@/components/workflows/WorkflowList';
 import { WorkflowStepDialog } from '@/components/workflows/WorkflowStepDialog';
+
+const ROLE_OPTIONS = [
+  { value: 'PROPERTY_MANAGER', label: 'Property Manager', icon: <User className="h-4 w-4" /> },
+  { value: 'MD', label: 'Managing Director', icon: <Shield className="h-4 w-4" /> },
+  { value: 'CEO', label: 'CEO', icon: <Crown className="h-4 w-4" /> },
+];
 
 export default function WorkflowSettings() {
   const { user } = useAuth();
@@ -22,6 +34,7 @@ export default function WorkflowSettings() {
     createWorkflow,
     deleteWorkflow,
     addWorkflowStep,
+    updateWorkflowStep,
     deleteWorkflowStep,
     setDefaultWorkflow,
     getApplicableSteps,
@@ -29,6 +42,19 @@ export default function WorkflowSettings() {
 
   const [addStepDialogOpen, setAddStepDialogOpen] = useState(false);
   const [selectedWorkflowForStep, setSelectedWorkflowForStep] = useState<string | null>(null);
+  const [editStepDialogOpen, setEditStepDialogOpen] = useState(false);
+  const [editingStep, setEditingStep] = useState<{
+    id: string;
+    step_order: number;
+    approver_role: UserRole;
+    min_amount: number | null;
+    requires_previous_approval: boolean;
+  } | null>(null);
+  const [editStepValues, setEditStepValues] = useState({
+    approver_role: 'MD' as UserRole,
+    min_amount: '',
+    requires_previous_approval: true,
+  });
 
   const handleSaveThresholds = async (autoApprove: number | null, ceoThreshold: number | null) => {
     await updateWorkflowSettings({
@@ -59,6 +85,53 @@ export default function WorkflowSettings() {
     }
   ) => {
     await addWorkflowStep(workflowId, step);
+  };
+
+  const handleEditStep = (step: { 
+    id: string; 
+    step_order: number; 
+    approver_role: UserRole; 
+    min_amount?: number | null;
+    requires_previous_approval?: boolean;
+  }) => {
+    setEditingStep({
+      id: step.id,
+      step_order: step.step_order,
+      approver_role: step.approver_role,
+      min_amount: step.min_amount ?? null,
+      requires_previous_approval: step.requires_previous_approval ?? (step.step_order > 1),
+    });
+    setEditStepValues({
+      approver_role: step.approver_role,
+      min_amount: step.min_amount?.toString() || '',
+      requires_previous_approval: step.requires_previous_approval ?? (step.step_order > 1),
+    });
+    setEditStepDialogOpen(true);
+  };
+
+  const handleSaveStep = async () => {
+    if (!editingStep) return;
+
+    await updateWorkflowStep(editingStep.id, {
+      approver_role: editStepValues.approver_role,
+      min_amount: editStepValues.min_amount ? parseFloat(editStepValues.min_amount) : 0,
+      requires_previous_approval: editStepValues.requires_previous_approval,
+    });
+
+    setEditStepDialogOpen(false);
+    setEditingStep(null);
+  };
+
+  const handleDeleteWorkflow = async (workflowId: string): Promise<void> => {
+    await deleteWorkflow(workflowId);
+  };
+
+  const handleSetDefaultWorkflow = async (workflowId: string, workflowType: 'PO' | 'INVOICE'): Promise<void> => {
+    await setDefaultWorkflow(workflowId, workflowType);
+  };
+
+  const handleDeleteStep = async (stepId: string): Promise<void> => {
+    await deleteWorkflowStep(stepId);
   };
 
   const getRoleBadge = (role: UserRole) => {
@@ -110,7 +183,7 @@ export default function WorkflowSettings() {
           <Workflow className="h-8 w-8 text-primary" />
           <div>
             <h2 className="text-3xl font-bold text-foreground">Approval Workflows</h2>
-            <p className="text-muted-foreground">Configure custom approval thresholds and multi-step workflows</p>
+            <p className="text-muted-foreground">Configure threshold-based approval workflows</p>
           </div>
         </div>
 
@@ -130,7 +203,7 @@ export default function WorkflowSettings() {
               <div>
                 <CardTitle>Custom Approval Workflows</CardTitle>
                 <CardDescription>
-                  Enable to create complex multi-step approval workflows with custom conditions
+                  Enable to create threshold-based approval workflows with custom steps
                 </CardDescription>
               </div>
               <Switch
@@ -146,10 +219,10 @@ export default function WorkflowSettings() {
           <WorkflowList
             workflows={workflows}
             onCreateWorkflow={handleCreateWorkflow}
-            onDeleteWorkflow={deleteWorkflow}
-            onSetDefaultWorkflow={setDefaultWorkflow}
+            onDeleteWorkflow={handleDeleteWorkflow}
+            onSetDefaultWorkflow={handleSetDefaultWorkflow}
             onAddStepClick={handleAddStepClick}
-            onDeleteStep={deleteWorkflowStep}
+            onDeleteStep={handleDeleteStep}
             getRoleBadge={getRoleBadge}
           />
         )}
@@ -163,23 +236,95 @@ export default function WorkflowSettings() {
           onAddStep={handleAddStep}
         />
 
+        {/* Edit Step Dialog */}
+        <Dialog open={editStepDialogOpen} onOpenChange={setEditStepDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Approval Step</DialogTitle>
+              <DialogDescription>
+                Modify the threshold-based approval step
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Approver Role</Label>
+                <Select
+                  value={editStepValues.approver_role}
+                  onValueChange={(value) => setEditStepValues({ ...editStepValues, approver_role: value as UserRole })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROLE_OPTIONS.map(role => (
+                      <SelectItem key={role.value} value={role.value}>
+                        <div className="flex items-center gap-2">
+                          {role.icon}
+                          {role.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Threshold Amount (£)</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g., 5000"
+                  value={editStepValues.min_amount}
+                  onChange={(e) => setEditStepValues({ ...editStepValues, min_amount: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  This step applies when PO amount is ≥ this threshold
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="edit-requires-previous"
+                  checked={editStepValues.requires_previous_approval}
+                  onCheckedChange={(checked) => 
+                    setEditStepValues({ ...editStepValues, requires_previous_approval: checked as boolean })
+                  }
+                />
+                <Label htmlFor="edit-requires-previous" className="text-sm font-normal">
+                  Requires previous step approval first (sequential)
+                </Label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditStepDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveStep}>Save Changes</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Help Section */}
         <Alert>
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>How Approval Workflows Work</AlertTitle>
+          <AlertTitle>How Threshold-Based Workflows Work</AlertTitle>
           <AlertDescription className="mt-2">
             <ul className="list-disc list-inside space-y-1 text-sm">
               <li>
-                <strong>Quick Thresholds</strong> work independently - set simple rules for auto-approval and CEO escalation
+                <strong>Each step has a threshold</strong> - the minimum amount that triggers that approval step
               </li>
               <li>
-                <strong>Custom Workflows</strong> give you full control over multi-step approval chains
+                <strong>Sequential approval</strong> - when enabled, higher-level approvers require lower-level approval first (e.g., MD → CEO)
               </li>
               <li>
-                When both are enabled, custom workflows take precedence over quick thresholds
+                <strong>Example:</strong> PM at £0, MD at £5,000, CEO at £15,000 means:
+                <ul className="list-disc list-inside ml-4 mt-1 text-muted-foreground">
+                  <li>£4,000 PO → PM only</li>
+                  <li>£10,000 PO → MD only</li>
+                  <li>£20,000 PO → MD first, then CEO</li>
+                </ul>
               </li>
               <li>
-                The default workflow is used for all new POs; you can have different workflows for different scenarios
+                Changes take effect immediately for new POs
               </li>
             </ul>
           </AlertDescription>

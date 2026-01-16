@@ -4,14 +4,16 @@ import { supabase } from '@/integrations/supabase/client';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Plus, Search, Pencil, Building, ToggleLeft, ToggleRight, Loader2, Upload } from 'lucide-react';
+import { Plus, Search, Edit, Building, Loader2, Upload, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface Property {
   id: string;
@@ -28,11 +30,13 @@ export default function Properties() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [csvDialogOpen, setCsvDialogOpen] = useState(false);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [saving, setSaving] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -68,12 +72,23 @@ export default function Properties() {
       (p.reference_code?.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesFilter = 
-      filterActive === 'all' ||
-      (filterActive === 'active' && p.is_active) ||
-      (filterActive === 'inactive' && !p.is_active);
+      statusFilter === 'all' ||
+      (statusFilter === 'active' && p.is_active) ||
+      (statusFilter === 'inactive' && !p.is_active);
     
     return matchesSearch && matchesFilter;
   });
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredProperties.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedProperties = filteredProperties.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
 
   function openAddDialog() {
     setEditingProperty(null);
@@ -233,8 +248,8 @@ export default function Properties() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Properties</h1>
-            <p className="text-muted-foreground">Manage properties for purchase order allocation</p>
+            <h1 className="text-3xl font-bold text-foreground">Properties</h1>
+            <p className="text-muted-foreground mt-1">Manage properties for purchase order allocation</p>
           </div>
           <div className="flex gap-2">
             <Dialog open={csvDialogOpen} onOpenChange={setCsvDialogOpen}>
@@ -262,103 +277,153 @@ export default function Properties() {
               </DialogContent>
             </Dialog>
             
-            <Button onClick={openAddDialog} className="bg-primary hover:bg-primary/90">
+            <Button onClick={openAddDialog}>
               <Plus className="h-4 w-4 mr-2" />
               Add Property
             </Button>
           </div>
         </div>
 
-        {/* Search & Filter */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search properties..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <select
-                value={filterActive}
-                onChange={(e) => setFilterActive(e.target.value as 'all' | 'active' | 'inactive')}
-                className="px-3 py-2 border border-input rounded-md text-sm bg-background"
-              >
-                <option value="all">All Properties</option>
-                <option value="active">Active Only</option>
-                <option value="inactive">Inactive Only</option>
-              </select>
+        {/* Filters */}
+        <Card className="p-4">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search properties..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
             </div>
-          </CardContent>
+            <Select value={statusFilter} onValueChange={(value: any) => setStatusFilter(value)}>
+              <SelectTrigger className="w-full sm:w-[180px] bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-popover z-50">
+                <SelectItem value="all">All Properties</SelectItem>
+                <SelectItem value="active">Active Only</SelectItem>
+                <SelectItem value="inactive">Inactive Only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </Card>
 
         {/* Properties Table */}
         <Card>
-          <CardContent className="p-0">
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-            ) : filteredProperties.length === 0 ? (
-              <div className="text-center py-12">
-                <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-foreground">No properties found</h3>
-                <p className="text-muted-foreground mt-1">
-                  {properties.length === 0 ? "Add your first property to get started" : "Try adjusting your search"}
-                </p>
-                {properties.length === 0 && (
-                  <Button onClick={openAddDialog} className="mt-4 bg-primary hover:bg-primary/90">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Property
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Property Name</TableHead>
-                    <TableHead>Address</TableHead>
-                    <TableHead>Reference</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : filteredProperties.length === 0 ? (
+            <div className="text-center py-12">
+              <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-foreground">No properties found</h3>
+              <p className="text-muted-foreground mt-1">
+                {properties.length === 0 ? "Add your first property to get started" : "Try adjusting your search"}
+              </p>
+              {properties.length === 0 && (
+                <Button onClick={openAddDialog} className="mt-4">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Property
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Property Name</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead>Reference</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedProperties.map((property) => (
+                  <TableRow key={property.id} className="hover:bg-muted/50">
+                    <TableCell className="font-medium">{property.name}</TableCell>
+                    <TableCell>{property.address}</TableCell>
+                    <TableCell>{property.reference_code || '—'}</TableCell>
+                    <TableCell className="text-center">
+                      <Badge 
+                        variant={property.is_active ? 'default' : 'secondary'}
+                        className={property.is_active ? 'bg-green-100 text-green-700 hover:bg-green-100' : ''}
+                      >
+                        {property.is_active ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(property)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Switch
+                          checked={property.is_active}
+                          onCheckedChange={() => toggleActive(property)}
+                        />
+                      </div>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredProperties.map((property) => (
-                    <TableRow key={property.id} className="hover:bg-muted/50">
-                      <TableCell className="font-medium">{property.name}</TableCell>
-                      <TableCell>{property.address}</TableCell>
-                      <TableCell>{property.reference_code || '-'}</TableCell>
-                      <TableCell>
-                        <Badge variant={property.is_active ? 'default' : 'secondary'}>
-                          {property.is_active ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => openEditDialog(property)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => toggleActive(property)}>
-                            {property.is_active ? (
-                              <ToggleRight className="h-4 w-4 text-green-600" />
-                            ) : (
-                              <ToggleLeft className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </Card>
+
+        {/* Pagination */}
+        {!loading && filteredProperties.length > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Rows per page:</span>
+              <Select value={pageSize.toString()} onValueChange={(value) => {
+                setPageSize(Number(value));
+                setCurrentPage(1);
+              }}>
+                <SelectTrigger className="w-[80px] bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover z-50">
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="25">25</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-muted-foreground">
+                Showing {startIndex + 1}-{Math.min(endIndex, filteredProperties.length)} of {filteredProperties.length}
+              </span>
+              
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                
+                <div className="flex items-center gap-1">
+                  <span className="text-sm font-medium">Page {currentPage} of {totalPages || 1}</span>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Add/Edit Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -408,7 +473,7 @@ export default function Properties() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleSave} disabled={saving} className="bg-primary hover:bg-primary/90">
+              <Button onClick={handleSave} disabled={saving}>
                 {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {editingProperty ? 'Update' : 'Add'} Property
               </Button>

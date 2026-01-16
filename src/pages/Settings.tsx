@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DelegationManager } from "@/components/delegations/DelegationManager";
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -198,16 +199,35 @@ export default function Settings() {
     }
   };
 
-  if (user?.role !== "ADMIN" && user?.role !== "CEO") {
+  if (user?.role !== "ADMIN" && user?.role !== "CEO" && user?.role !== "MD") {
     return (
       <MainLayout title="Settings">
         <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Access denied. Admin or CEO only.</div>
+          <div className="text-muted-foreground">Access denied. Admin, CEO, or MD only.</div>
         </div>
       </MainLayout>
     );
   }
 
+  // MD users only see the Delegation Manager
+  if (user?.role === 'MD') {
+    return (
+      <MainLayout title="Settings">
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <SettingsIcon className="h-8 w-8 text-primary" />
+            <div>
+              <h2 className="text-3xl font-bold text-foreground">Approval Delegation</h2>
+              <p className="text-muted-foreground">Manage your approval delegates</p>
+            </div>
+          </div>
+          <DelegationManager />
+        </div>
+      </MainLayout>
+    );
+  }
+
+  // ADMIN/CEO see full settings
   return (
     <MainLayout title="Settings">
       <TooltipProvider>

@@ -13,13 +13,13 @@ export function Sidebar() {
 
   const navItems = [
     { icon: Home, label: 'Dashboard', to: '/dashboard', roles: ['PROPERTY_MANAGER', 'MD', 'CEO', 'ACCOUNTS', 'ADMIN'] },
-    { icon: FileText, label: 'Purchase Orders', to: '/pos', roles: ['PROPERTY_MANAGER', 'MD', 'ACCOUNTS'] },
+    { icon: FileText, label: 'Purchase Orders', to: '/pos', roles: ['PROPERTY_MANAGER', 'MD', 'ACCOUNTS', 'ADMIN'] },
     { icon: CheckSquare, label: 'Approvals', to: '/approvals', roles: ['MD', 'CEO', 'ADMIN'] },
-    { icon: Receipt, label: 'Invoices', to: '/invoices', roles: ['PROPERTY_MANAGER', 'ACCOUNTS', 'MD'] },
-    { icon: Users, label: 'Contractors', to: '/contractors', roles: ['PROPERTY_MANAGER', 'MD', 'ACCOUNTS'] },
-    { icon: Building, label: 'Properties', to: '/properties', roles: ['PROPERTY_MANAGER', 'MD', 'ACCOUNTS'] },
-    { icon: UserCog, label: 'User Management', to: '/users', roles: ['PROPERTY_MANAGER', 'MD'] },
-    { icon: Settings, label: 'Settings', to: '/settings', roles: ['ADMIN', 'CEO'] },
+    { icon: Receipt, label: 'Invoices', to: '/invoices', roles: ['PROPERTY_MANAGER', 'ACCOUNTS', 'MD', 'ADMIN'] },
+    { icon: Users, label: 'Contractors', to: '/contractors', roles: ['PROPERTY_MANAGER', 'MD', 'ACCOUNTS', 'ADMIN'] },
+    { icon: Building, label: 'Properties', to: '/properties', roles: ['PROPERTY_MANAGER', 'MD', 'ACCOUNTS', 'ADMIN'] },
+    { icon: UserCog, label: 'User Management', to: '/users', roles: ['PROPERTY_MANAGER', 'MD', 'ADMIN'] },
+    { icon: Settings, label: 'Settings', to: '/settings', roles: ['ADMIN', 'CEO', 'MD'] },
   ];
 
   const filteredNavItems = navItems.filter(item => item.roles.includes(user.role));
